@@ -74,24 +74,7 @@ cp .env.example .env
 ```
 --- 
 
-## 5. Project layout
-
-.
-├── main.py                    # CLI entry point to run Agent 1
-├── requirements.txt
-├── .env.example
-├── README.md
-└── src/
-    └── agents/
-        └── pipeline_agent/
-            ├── graph.py           # LangGraph pipeline definition
-            ├── steps.py           # Agent logic (extract, threat model, vulnerabilities)
-            ├── state.py           # PipelineAgentState TypedDict
-            └── pipeline_agent.py  # run_pipeline_agent() entry point
-
----
-
-## 6. Configure the input file for Agent 1
+## 5. Configure the input file for Agent 1
 
 Agent 1 expects a target Python file to analyze. Edit main.py (or the configured entry) to point to the Python pipeline file you want analyzed. Example placeholder in main.py:
 
@@ -101,7 +84,7 @@ TARGET_PYTHON_FILE = "path/to/your_pipeline.py"
 
 ---
 
-## 7. Run Agent 1 (pipeline extraction + threat model + vulnerabilities)
+## 6. Run Agent 1 (pipeline extraction + threat model + vulnerabilities)
 
 ```python
 python main.py
