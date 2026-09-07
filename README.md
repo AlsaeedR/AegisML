@@ -39,13 +39,15 @@ AegisML/
 │       └── testing_agent/
 │           ├── state.py              # Agent state definitions (TypedDict)
 │           ├── loader.py             # Trained model + CSV dataset loading
+│           ├── target_matching.py    # Filters which tests run based on Agent 1's test targets
 │           ├── poisoning_test.py     # Test 1: Data Poisoning (label-flip + ART SVM attack)
 │           ├── adversarial_test.py   # Test 2: Adversarial Robustness (ART HopSkipJump evasion)
 │           ├── graph.py              # LangGraph StateGraph & evidence aggregation
 │           └── testing_agent.py      # Agent 2 execution entry point
 ├── data/                             # Sample target pipelines + generated model/dataset
 ├── generate_model_and_dataset.py     # Utility: trains sample model + dataset for Agent 2
-├── run_agent2.py                     # Test execution harness for Agent 2
+├── run_agent2.py                     # Test execution harness for Agent 2 (standalone)
+├── run_full_pipeline.py              # Connects Agent 1 <-> Agent 2 (test targets + test results loop)
 ├── main.py                           # Test execution harness for Agent 1
 ├── requirements.txt                  # Project dependencies
 └── README.md
@@ -171,6 +173,7 @@ python main.py
 
 
 
+
 ### 7. Run Agent 2
 
 Generate a sample trained model + dataset (one-time setup):
@@ -178,14 +181,20 @@ Generate a sample trained model + dataset (one-time setup):
 python generate_model_and_dataset.py
 ```
 
-Execute the agent harness:
+**Standalone execution** (Agent 2 only, no Agent 1 involved):
 ```bash
 python run_agent2.py
 ```
 
+**Connected execution** (Agent 1 -> test targets -> Agent 2 -> test results -> Agent 1, per architecture):
+```bash
+python run_full_pipeline.py
+```
+
 ### Execution Flow:
 1. **Loading**: The trained model (`.pkl`) and CSV dataset are loaded via joblib and pandas, and a sample of text/label pairs is prepared for testing.
-2. **Data Poisoning Test**: A shadow clone of the model is retrained on a label-flipped copy of the training data (15% flip rate); the accuracy drop between the clean and poisoned retrain quantifies susceptibility to training-data corruption. Where the classifier is an SVM, ART's `PoisoningAttackSVM` additionally crafts a targeted poisoning point to confirm decision-boundary sensitivity.
-3. **Adversarial Robustness Test**: The vectorizer/classifier pair is split out of the pipeline, the classifier is wrapped with ART's `SklearnClassifier`, and ART's `HopSkipJump` black-box evasion attack perturbs TF-IDF vectors of a text sample; the fraction of flipped predictions quantifies robustness.
-4. **Evidence Aggregation**: Each test's status (`vulnerable` / `not_vulnerable`), severity, and evidence are aggregated into a structured results list, with placeholder entries (`not_tested`) for the two vulnerability categories not yet implemented (Preprocessing Attack Surface, Data Validation Weaknesses).
-5. **Output**: The structured test results (`vulnerability_id`, `status`, `severity`, `evidence`) are printed to stdout as formatted JSON, ready to feed back into Agent 1's Risk Scoring Engine or forward to Agent 3's Report Generator.
+2. **Target Filtering**: If `test_targets` are supplied (e.g. from Agent 1's Vulnerability Identifier), each test first checks whether its vulnerability id (V1, V4) is among the targets. If not, the test is skipped and marked `not_applicable` instead of running. Running Agent 2 standalone (no targets supplied) runs every implemented test, unaffected.
+3. **Data Poisoning Test (V1)**: A shadow clone of the model is retrained on label-flipped copies of the training data across multiple poisoning fractions (5%, 15%, 30%); the accuracy drop at each fraction, and whether it grows with more poisoning, quantifies susceptibility to training-data corruption. Where the classifier is an SVM, ART's `PoisoningAttackSVM` additionally crafts a targeted poisoning point to confirm decision-boundary sensitivity.
+4. **Adversarial Robustness Test (V4)**: The vectorizer/classifier pair is split out of the pipeline, the classifier is wrapped with ART's `SklearnClassifier`, and ART's `HopSkipJump` black-box evasion attack perturbs TF-IDF vectors of a text sample (50 samples). Success is reported both for any perturbation and, more strictly, only for perturbations within a realistic relative-size budget (≤ 50% of the original vector's norm) — the latter is what determines status/severity.
+5. **Evidence Aggregation**: Each test's status (`vulnerable` / `not_vulnerable` / `not_applicable`), severity, and evidence are aggregated into a structured results list, with placeholder entries (`not_tested`) for the two vulnerability categories not yet implemented (Preprocessing Attack Surface, Data Validation Weaknesses).
+6. **Output**: The structured test results (`vulnerability_id`, `status`, `severity`, `evidence`) are printed to stdout as formatted JSON. In standalone mode this is the final output; in connected mode (`run_full_pipeline.py`), these results are fed back into Agent 1 via the `testing_agent_results` parameter, and Agent 1 re-runs to produce a final threat model and vulnerability findings informed by real test evidence.
