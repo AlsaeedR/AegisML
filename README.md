@@ -168,3 +168,24 @@ python main.py
 3. **Pydantic Validation & Reflection**: The generated threat model is validated against strict Pydantic schemas. If schema or taxonomy validation fails, diagnostic errors trigger an autonomous self-repair loop (up to 3 retries).
 4. **Vulnerability Reasoning**: The LLM evaluates the four MVP vulnerabilities and formulates concrete code-level remediation recommendations.
 5. **Output**: The validated pipeline graph, threat model, and vulnerability findings are printed to stdout as formatted JSON.
+
+
+
+### 7. Run Agent 2
+
+Generate a sample trained model + dataset (one-time setup):
+```bash
+python generate_model_and_dataset.py
+```
+
+Execute the agent harness:
+```bash
+python run_agent2.py
+```
+
+### Execution Flow:
+1. **Loading**: The trained model (`.pkl`) and CSV dataset are loaded via joblib and pandas, and a sample of text/label pairs is prepared for testing.
+2. **Data Poisoning Test**: A shadow clone of the model is retrained on a label-flipped copy of the training data (15% flip rate); the accuracy drop between the clean and poisoned retrain quantifies susceptibility to training-data corruption. Where the classifier is an SVM, ART's `PoisoningAttackSVM` additionally crafts a targeted poisoning point to confirm decision-boundary sensitivity.
+3. **Adversarial Robustness Test**: The vectorizer/classifier pair is split out of the pipeline, the classifier is wrapped with ART's `SklearnClassifier`, and ART's `HopSkipJump` black-box evasion attack perturbs TF-IDF vectors of a text sample; the fraction of flipped predictions quantifies robustness.
+4. **Evidence Aggregation**: Each test's status (`vulnerable` / `not_vulnerable`), severity, and evidence are aggregated into a structured results list, with placeholder entries (`not_tested`) for the two vulnerability categories not yet implemented (Preprocessing Attack Surface, Data Validation Weaknesses).
+5. **Output**: The structured test results (`vulnerability_id`, `status`, `severity`, `evidence`) are printed to stdout as formatted JSON, ready to feed back into Agent 1's Risk Scoring Engine or forward to Agent 3's Report Generator.
