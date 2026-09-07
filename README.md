@@ -98,6 +98,12 @@ Install the required packages from `requirements.txt`:
 pip install -r requirements.txt
 ```
 
+To regenerate the entire file with all current dependencies:
+
+```bash
+pip freeze > requirements.txt
+```
+
 ---
 
 ### 4. Configure Environment Variables
