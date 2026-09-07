@@ -22,8 +22,7 @@ def run_adversarial_test(state: Dict[str, Any]) -> Dict[str, Any]:
     except ImportError:
         return {'adversarial_evidence': {'vulnerability_id': 'V4', 'vulnerability_name': 'Adversarial Robustness', 'status': 'inconclusive', 'severity': 'low', 'evidence': {'status': 'skipped', 'reason': 'adversarial-robustness-toolbox (ART) is not installed.'}}}
     try:
-        # Larger sample than before (10 -> 50) so success/failure rates carry
-        # more statistical weight rather than resting on a handful of points.
+        
         sample_size = min(50, len(X_text))
         sample_texts = X_text[:sample_size]
         X_vec = vectorizer.transform(sample_texts)
@@ -40,21 +39,12 @@ def run_adversarial_test(state: Dict[str, Any]) -> Dict[str, Any]:
         flipped = int(np.sum(flipped_mask))
         success_rate = round(flipped / sample_size, 4)
 
-        # Relative perturbation budget: a flip only "counts" as a realistic
-        # attack if the perturbation needed is small relative to the size of
-        # the original input vector. Perturbations larger than the input
-        # itself are not a meaningful real-world attack.
+        
         max_relative_perturbation = 0.5
         original_norms = np.linalg.norm(X_arr, axis=1)
         perturbation_norms = np.linalg.norm(X_adv - X_arr, axis=1)
 
-        # Some TF-IDF vectors can be (near) all-zero (e.g. text with no
-        # vocabulary overlap). Dividing by ~0 there produces meaningless,
-        # huge ratios that blow up any average. We treat those samples as
-        # "outside the budget" (their perturbation is not meaningfully
-        # small relative to a ~0 input) but exclude them from the average
-        # relative-perturbation statistic so a couple of edge cases don't
-        # distort the whole report.
+      
         zero_norm_epsilon = 1e-6
         valid_mask = original_norms > zero_norm_epsilon
         n_zero_norm_samples = int(np.sum(~valid_mask))
@@ -75,9 +65,7 @@ def run_adversarial_test(state: Dict[str, Any]) -> Dict[str, Any]:
             else None
         )
 
-        # Status/severity are based on the stricter, budget-constrained
-        # success rate so the finding reflects realistic attacks, not just
-        # any perturbation regardless of size.
+        
         status = 'vulnerable' if success_rate_within_budget >= 0.3 else 'not_vulnerable'
         severity = (
             'high' if success_rate_within_budget >= 0.6
