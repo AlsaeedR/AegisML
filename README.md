@@ -27,18 +27,27 @@ Agent 1 analyzes pipelines for four high-impact vulnerability classes:
 AegisML/
 ├── src/
 │   └── agents/
-│       └── pipeline_agent/
-│           ├── schemas.py        # NIST AI 100-2e2025 Pydantic schemas
-│           ├── code_parser.py    # Generic AST pipeline extraction
-│           ├── networkx_utils.py # Graph construction & topology analysis
-│           ├── tools.py          # Modular agent tools & Pydantic validation
-│           ├── steps.py          # LLM prompt chains & reasoning logic
-│           ├── graph.py          # LangGraph StateGraph & self-correction loop
-│           ├── state.py          # Agent state definitions (TypedDict)
-│           └── pipeline_agent.py # Agent 1 execution entry point
-├── data/                         # Sample target pipelines (test inputs only)
-├── main.py                       # Test execution harness
-├── requirements.txt              # Project dependencies
+│       ├── pipeline_agent/
+│       │   ├── schemas.py            # NIST AI 100-2e2025 Pydantic schemas
+│       │   ├── code_parser.py        # Generic AST pipeline extraction
+│       │   ├── networkx_utils.py     # Graph construction & topology analysis
+│       │   ├── tools.py              # Modular agent tools & Pydantic validation
+│       │   ├── steps.py              # LLM prompt chains & reasoning logic
+│       │   ├── graph.py              # LangGraph StateGraph & self-correction loop
+│       │   ├── state.py              # Agent state definitions (TypedDict)
+│       │   └── pipeline_agent.py     # Agent 1 execution entry point
+│       └── testing_agent/
+│           ├── state.py              # Agent state definitions (TypedDict)
+│           ├── loader.py             # Trained model + CSV dataset loading
+│           ├── poisoning_test.py     # Test 1: Data Poisoning (label-flip + ART SVM attack)
+│           ├── adversarial_test.py   # Test 2: Adversarial Robustness (ART HopSkipJump evasion)
+│           ├── graph.py              # LangGraph StateGraph & evidence aggregation
+│           └── testing_agent.py      # Agent 2 execution entry point
+├── data/                             # Sample target pipelines + generated model/dataset
+├── generate_model_and_dataset.py     # Utility: trains sample model + dataset for Agent 2
+├── run_agent2.py                     # Test execution harness for Agent 2
+├── main.py                           # Test execution harness for Agent 1
+├── requirements.txt                  # Project dependencies
 └── README.md
 ```
 
