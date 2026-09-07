@@ -4,19 +4,22 @@ from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-
-def get_llm():
+def get_llm(temperature: float = 0.2) -> ChatOpenAI:
     """
-    LangChain LLM wrapper for Agent 1.
+    Initializes and returns the LangChain ChatOpenAI instance for Agent 1.
+    Checks environment for the API key at call time to support runtime configuration.
     """
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY is not set in environment.")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OPENAI_API_KEY is not set. Please ensure it is defined in your environment or .env file."
+        )
 
-    llm = ChatOpenAI(
-        api_key=OPENAI_API_KEY,
-        model="gpt-4.1-mini",
-        temperature=0.2,
+    model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+
+    return ChatOpenAI(
+        api_key=api_key,
+        model=model_name,
+        temperature=temperature,
     )
-    return llm
