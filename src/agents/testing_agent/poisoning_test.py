@@ -15,12 +15,7 @@ def _get_classifier_step(model: Any):
         return (vectorizer, classifier)
     return (None, model)
 
-def _generic_label_flip_test(model: Any, X_text: List[str], y_true: List[Any], flip_fraction: float=0.15) -> Dict[str, Any]:
-    X_train, X_test, y_train, y_test = train_test_split(X_text, y_true, test_size=0.3, random_state=42)
-    clean_model = clone(model)
-    clean_model.fit(X_train, y_train)
-    clean_preds = clean_model.predict(X_test)
-    clean_acc = accuracy_score(y_test, clean_preds)
+def _label_flip_at_fraction(model: Any, X_train, X_test, y_train, y_test, clean_acc: float, flip_fraction: float) -> Dict[str, Any]:
     labels_pool = list(set(y_train))
     y_train_poisoned = list(y_train)
     n_flip = max(1, int(len(y_train) * flip_fraction))
@@ -35,7 +30,55 @@ def _generic_label_flip_test(model: Any, X_text: List[str], y_true: List[Any], f
     poisoned_preds = poisoned_model.predict(X_test)
     poisoned_acc = accuracy_score(y_test, poisoned_preds)
     accuracy_drop = round(clean_acc - poisoned_acc, 4)
-    return {'method': 'generic_label_flip_retrain', 'flip_fraction_used': flip_fraction, 'n_labels_flipped': n_flip, 'clean_accuracy': round(clean_acc, 4), 'poisoned_accuracy': round(poisoned_acc, 4), 'accuracy_drop': accuracy_drop, 'interpretation': 'Significant accuracy drop after label-flip poisoning indicates the pipeline has no data validation / outlier rejection to protect training against corrupted labels.' if accuracy_drop > 0.05 else 'Model showed resilience to a small fraction of flipped training labels in this simulation.'}
+    return {
+        'flip_fraction': flip_fraction,
+        'n_labels_flipped': n_flip,
+        'poisoned_accuracy': round(poisoned_acc, 4),
+        'accuracy_drop': accuracy_drop,
+    }
+
+def _generic_label_flip_test(model: Any, X_text: List[str], y_true: List[Any], flip_fractions: List[float] = None) -> Dict[str, Any]:
+    if flip_fractions is None:
+        flip_fractions = [0.05, 0.15, 0.30]
+
+    X_train, X_test, y_train, y_test = train_test_split(X_text, y_true, test_size=0.3, random_state=42)
+    clean_model = clone(model)
+    clean_model.fit(X_train, y_train)
+    clean_preds = clean_model.predict(X_test)
+    clean_acc = accuracy_score(y_test, clean_preds)
+
+    trend = [
+        _label_flip_at_fraction(model, X_train, X_test, y_train, y_test, clean_acc, frac)
+        for frac in flip_fractions
+    ]
+
+    # Use the middle (moderate) flip fraction as the headline result, same
+    # threshold behaviour as before, while keeping the full trend as evidence.
+    headline = trend[len(trend) // 2]
+    accuracy_drop = headline['accuracy_drop']
+
+    is_monotonic = all(
+        trend[i]['accuracy_drop'] <= trend[i + 1]['accuracy_drop'] + 1e-9
+        for i in range(len(trend) - 1)
+    )
+
+    return {
+        'method': 'generic_label_flip_retrain',
+        'clean_accuracy': round(clean_acc, 4),
+        'flip_trend': trend,
+        'headline_flip_fraction': headline['flip_fraction'],
+        'accuracy_drop': accuracy_drop,
+        'drop_increases_with_more_poisoning': is_monotonic,
+        'interpretation': (
+            'Significant accuracy drop after label-flip poisoning, and the drop '
+            'grows as more of the training data is poisoned, indicating the '
+            'pipeline has no data validation / outlier rejection to protect '
+            'training against corrupted labels.'
+            if accuracy_drop > 0.05
+            else 'Model showed resilience to flipped training labels across '
+            'the tested poisoning fractions in this simulation.'
+        ),
+    }
 
 def _art_svm_poisoning_test(classifier: Any, X_vec, y_true: List[Any]) -> Dict[str, Any]:
     if not isinstance(classifier, (SVC, LinearSVC)):
