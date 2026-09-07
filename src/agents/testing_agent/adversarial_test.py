@@ -39,12 +39,12 @@ def run_adversarial_test(state: Dict[str, Any]) -> Dict[str, Any]:
         flipped = int(np.sum(flipped_mask))
         success_rate = round(flipped / sample_size, 4)
 
-        
+     
         max_relative_perturbation = 0.5
         original_norms = np.linalg.norm(X_arr, axis=1)
         perturbation_norms = np.linalg.norm(X_adv - X_arr, axis=1)
 
-      
+       
         zero_norm_epsilon = 1e-6
         valid_mask = original_norms > zero_norm_epsilon
         n_zero_norm_samples = int(np.sum(~valid_mask))
@@ -65,7 +65,7 @@ def run_adversarial_test(state: Dict[str, Any]) -> Dict[str, Any]:
             else None
         )
 
-        
+       
         status = 'vulnerable' if success_rate_within_budget >= 0.3 else 'not_vulnerable'
         severity = (
             'high' if success_rate_within_budget >= 0.6

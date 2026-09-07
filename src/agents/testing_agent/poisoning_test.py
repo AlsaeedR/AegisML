@@ -52,7 +52,8 @@ def _generic_label_flip_test(model: Any, X_text: List[str], y_true: List[Any], f
         for frac in flip_fractions
     ]
 
-   
+    # Use the middle (moderate) flip fraction as the headline result, same
+    # threshold behaviour as before, while keeping the full trend as evidence.
     headline = trend[len(trend) // 2]
     accuracy_drop = headline['accuracy_drop']
 
