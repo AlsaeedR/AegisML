@@ -11,6 +11,7 @@ def run_testing_agent(
     label_column: str = "label",
     vectorizer_path: Optional[str] = None,
     test_targets: Optional[List[str]] = None,
+    pipeline_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Executes Agent 2 (Vulnerability Testing Agent).
@@ -41,6 +42,7 @@ def run_testing_agent(
         "label_column": label_column,
         "vectorizer_path": vectorizer_path,
         "test_targets": test_targets,
+        "pipeline_path": pipeline_path, 
         "status": "initialized",
     }
 

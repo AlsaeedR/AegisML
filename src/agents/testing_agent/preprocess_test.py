@@ -17,7 +17,7 @@ def _scan_shell(tree):
             and n.func.attr in ["system","call"] and "os" in ast.unparse(n.func.value).lower()]
 
 def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
-    path = state.get("model_path")
+    path = state.get("pipeline_path")  # Change this from model_path
     if not path:
         return {"preprocessing_evidence": {"status": "error", "summary": "No model path"}}
     try:

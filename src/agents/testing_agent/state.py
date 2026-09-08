@@ -13,6 +13,7 @@ class TestingAgentState(TypedDict, total=False):
     # Artifact references and dataset configuration
     model_path: str
     dataset_path: str
+    pipeline_path: str
     vectorizer_path: Optional[str]
     text_column: str
     label_column: str

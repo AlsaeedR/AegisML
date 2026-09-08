@@ -1,5 +1,6 @@
 from typing import Dict, Any, Literal
 from langgraph.graph import StateGraph, END
+from .risk_score import calculate_risk_score
 
 from .state import PipelineAgentState
 from .tools import (
@@ -115,8 +116,11 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
         validation_errors=validation_errors,
     )
 
+        # Score the vulnerabilities before returning to the state
+    scored_vulnerabilities = calculate_risk_score(vulnerabilities_raw.get("vulnerabilities", []))
+    
     return {
-        "vulnerability_findings": vulnerabilities_raw,
+        "vulnerability_findings": {"vulnerabilities": scored_vulnerabilities},
     }
 
 

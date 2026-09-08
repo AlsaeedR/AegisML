@@ -88,6 +88,14 @@ class VulnerabilityFinding(BaseModel):
         default_factory=list,
         description="Actionable, code-level remediation recommendations."
     )
+    severity: Optional[str] = Field(
+        default=None,
+        description="Risk severity level calculated by the risk scoring module."
+    )
+    risk_score: Optional[float] = Field(
+        default=None,
+        description="Numerical risk score (0-10) calculated by the risk scoring module."
+    )
 
 
 class VulnerabilitiesReport(BaseModel):

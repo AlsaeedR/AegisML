@@ -39,6 +39,7 @@ if os.path.exists(model_path) and os.path.exists(dataset_path):
         agent_1_results=agent_1_result,
         model_path=model_path,
         dataset_path=dataset_path,
+        pipeline_path=target_pipeline_path,
         text_column="text",
         label_column="label",
     )

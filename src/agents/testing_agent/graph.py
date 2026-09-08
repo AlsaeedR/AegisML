@@ -11,7 +11,8 @@ from .loader import (
 )
 from .poisoning_test import run_poisoning_test
 from .adversarial_test import run_adversarial_test
-
+from .preprocess_test import run_preprocess_checks
+from .validation_test import run_validation_checks
 
 def node_load_artifacts(state: TestingAgentState) -> Dict[str, Any]:
     """
@@ -66,6 +67,14 @@ def node_plan_tests(state: TestingAgentState) -> Dict[str, Any]:
             planned_tests.append("V1_poisoning")
             plan_log.append("Scheduled V1_poisoning based on Agent 1 data poisoning finding.")
 
+        if "V2" in flagged_categories or any("preprocess" in str(c).lower() for c in flagged_categories.values()):
+            planned_tests.append("V2_preprocessing")
+            plan_log.append("Scheduled V2_preprocessing based on Agent 1 preprocessing finding.")
+
+        if "V3" in flagged_categories or any("validation" in str(c).lower() for c in flagged_categories.values()):
+            planned_tests.append("V3_validation")
+            plan_log.append("Scheduled V3_validation based on Agent 1 data validation finding.")
+
         if "V4" in flagged_categories or any("adversarial" in str(c).lower() for c in flagged_categories.values()):
             planned_tests.append("V4_adversarial")
             plan_log.append("Scheduled V4_adversarial based on Agent 1 adversarial robustness finding.")
@@ -93,8 +102,13 @@ def route_after_planning(
         return "poisoning_test"
     if "V4_adversarial" in planned:
         return "adversarial_test"
-
+    if "V2_preprocessing" in planned:
+        return "preprocess_test"
+    if "V3_validation" in planned:
+        return "validation_test"
     return "aggregate_results"
+
+    
 
 
 def node_poisoning_test(state: TestingAgentState) -> Dict[str, Any]:
@@ -114,7 +128,10 @@ def route_after_poisoning(
 
     if "V4_adversarial" in planned:
         return "adversarial_test"
-
+    if "V2_preprocessing" in planned:
+        return "preprocess_test"
+    if "V3_validation" in planned:
+        return "validation_test"
     return "aggregate_results"
 
 
@@ -125,11 +142,19 @@ def node_adversarial_test(state: TestingAgentState) -> Dict[str, Any]:
     return run_adversarial_test(state)
 
 
+def node_preprocess_test(state: TestingAgentState) -> Dict[str, Any]:
+    """Executes the empirical preprocessing security checks ."""
+    return run_preprocess_checks(state)
+
+def node_validation_test(state: TestingAgentState) -> Dict[str, Any]:
+    """Executes the empirical data validation checks ."""
+    return run_validation_checks(state)
+
+
 def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
     """
     Aggregates all empirical evidence and performs hypothesis verification
     by correlating test measurements against Agent 1 qualitative findings.
-    Leaves V2 and V3 cleanly recorded as pending the assigned teammate's work.
     """
     results: List[Dict[str, Any]] = []
     verifications: List[Dict[str, Any]] = []
@@ -178,7 +203,15 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
                 ),
             })
 
-    # 3. Preserved placeholders for teammate implementation
+    # 3. Process Preprocessing Results (V2)
+    if "preprocessing_evidence" in state:
+        results.append(state["preprocessing_evidence"])
+
+    # 4. Process Validation Results (V3)
+    if "validation_evidence" in state:
+        results.append(state["validation_evidence"])
+
+    # 5. Preserved placeholders (only if V2/V3 didn't run)
     if not state.get("preprocessing_evidence"):
         results.append({
             "vulnerability_id": "V2",
@@ -224,6 +257,8 @@ def build_testing_agent_graph():
     graph.add_node("plan_tests", node_plan_tests)
     graph.add_node("poisoning_test", node_poisoning_test)
     graph.add_node("adversarial_test", node_adversarial_test)
+    graph.add_node("preprocess_test", node_preprocess_test)
+    graph.add_node("validation_test", node_validation_test)
     graph.add_node("aggregate_results", node_aggregate_results)
 
     # Wire graph flow
@@ -237,6 +272,8 @@ def build_testing_agent_graph():
         {
             "poisoning_test": "poisoning_test",
             "adversarial_test": "adversarial_test",
+            "preprocess_test": "preprocess_test",
+            "validation_test": "validation_test",
             "aggregate_results": "aggregate_results",
         },
     )
@@ -246,11 +283,15 @@ def build_testing_agent_graph():
         route_after_poisoning,
         {
             "adversarial_test": "adversarial_test",
+            "preprocess_test": "preprocess_test", 
+            "validation_test": "validation_test",
             "aggregate_results": "aggregate_results",
         },
     )
 
-    graph.add_edge("adversarial_test", "aggregate_results")
+    graph.add_edge("adversarial_test", "preprocess_test")
+    graph.add_edge("preprocess_test", "validation_test")
+    graph.add_edge("validation_test", "aggregate_results")
     graph.add_edge("aggregate_results", END)
 
     return graph.compile()
