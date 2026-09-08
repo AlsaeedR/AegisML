@@ -1,44 +1,43 @@
-import ast
+import numpy as np
 from typing import Any, Dict
 
-def _scan_pickle(tree):
-    return [{"type": "Pickle Deserialization", "severity": "Critical", "line": n.lineno} 
-            for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) 
-            and n.func.attr == "load" and "pickle" in ast.unparse(n.func.value).lower()]
-
-def _scan_eval(tree):
-    return [{"type": "Dynamic Execution", "severity": "Critical", "line": n.lineno} 
-            for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) 
-            and n.func.id in ["eval","exec","compile"]]
-
-def _scan_shell(tree):
-    return [{"type": "Shell Injection", "severity": "High", "line": n.lineno} 
-            for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) 
-            and n.func.attr in ["system","call"] and "os" in ast.unparse(n.func.value).lower()]
-
 def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
-    path = state.get("pipeline_path")  # Change this from model_path
-    if not path:
-        return {"preprocessing_evidence": {"status": "error", "summary": "No model path"}}
+    model = state.get("model") # The full pipeline handles vectorization!
+    
+    if not model:
+        return {"preprocessing_evidence": {
+            "vulnerability_id": "V2", "vulnerability_name": "Preprocessing Attack Surface",
+            "status": "inconclusive", "severity": "low",
+            "evidence": {"status": "skipped", "reason": "Missing model"}
+        }}
+
+    # Craft malicious inputs to break the preprocessing pipeline
+    malicious_inputs = [
+        "a" * 10000,           # Extremely long string
+        "\x00\x01\x02",        # Null bytes
+        "😀" * 500,            # Complex unicode
+        "",                    # Empty string
+        " " * 1000,            # Whitespace only
+        "DROP TABLE users;",   # SQL injection attempt
+        "<script>alert(1)</script>", # XSS attempt
+    ]
+
     try:
-        with open(path) as f: tree = ast.parse(f.read())
+        # This will run the internal vectorizer and classifier
+        preds = model.predict(malicious_inputs)
+        status = "not_vulnerable"
+        severity = "low"
+        evidence = {"status": "ok", "details": "Model handled malformed inputs without crashing", "predictions": preds.tolist()}
     except Exception as e:
-        return {"preprocessing_evidence": {"status": "error", "summary": str(e)}}
-    
-    risks = _scan_pickle(tree) + _scan_eval(tree) + _scan_shell(tree)
-    sev_map = {"Critical":4,"High":3}
-    severity = max(risks, key=lambda x: sev_map.get(x["severity"],0)).get("severity","Low").lower() if risks else "low"
-    
-    
+        status = "vulnerable"
+        severity = "high"
+        evidence = {"status": "error", "reason": str(e)}
+
     return {"preprocessing_evidence": {
         "vulnerability_id": "V2",
         "vulnerability_name": "Preprocessing Attack Surface",
-        "status": "vulnerable" if risks else "not_vulnerable",
+        "status": status,
         "severity": severity,
-        "evidence": { 
-            "insecure_deserialization": _scan_pickle(tree),
-            "dynamic_execution": _scan_eval(tree),
-            "shell_command_injection": _scan_shell(tree),
-        },
-        "summary": f"{len(risks)} risk(s)" if risks else "All clean"
+        "evidence": evidence,
+        "summary": "1 issue(s)" if status == "vulnerable" else "All clean"
     }}
