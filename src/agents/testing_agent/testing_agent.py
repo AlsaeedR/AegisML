@@ -12,6 +12,7 @@ def run_testing_agent(
     vectorizer_path: Optional[str] = None,
     test_targets: Optional[List[str]] = None,
     pipeline_path: Optional[str] = None
+    
 ) -> Dict[str, Any]:
     """
     Executes Agent 2 (Vulnerability Testing Agent).

@@ -116,9 +116,14 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
         validation_errors=validation_errors,
     )
 
-        # Score the vulnerabilities before returning to the state
-    scored_vulnerabilities = calculate_risk_score(vulnerabilities_raw.get("vulnerabilities", []))
-    
+    # Score the vulnerabilities using the threat model's deployment context,
+    # so existing_controls and affected_components actually influence the score.
+    deployment_context = threat_model.get("deployment_context")
+    scored_vulnerabilities = calculate_risk_score(
+        vulnerabilities_raw.get("vulnerabilities", []),
+        deployment_context,
+    )
+
     return {
         "vulnerability_findings": {"vulnerabilities": scored_vulnerabilities},
     }

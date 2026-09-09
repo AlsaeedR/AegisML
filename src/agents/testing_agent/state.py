@@ -17,6 +17,7 @@ class TestingAgentState(TypedDict, total=False):
     vectorizer_path: Optional[str]
     text_column: str
     label_column: str
+    code: Optional[str]
     test_targets: Optional[List[str]]
 
     # In-memory models and data

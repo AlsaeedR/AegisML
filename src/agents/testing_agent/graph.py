@@ -14,17 +14,22 @@ from .adversarial_test import run_adversarial_test
 from .preprocess_test import run_preprocess_checks
 from .validation_test import run_validation_checks
 
+# Define TEST_ORDER here so it doesn't crash
+TEST_ORDER = ["V1_poisoning", "V4_adversarial", "V2_preprocessing", "V3_validation"]
+
 def node_load_artifacts(state: TestingAgentState) -> Dict[str, Any]:
-    """
-    Loads model, dataset, and vectorizer artifacts into memory.
-    Inspects Agent 1 results to locate separately saved vectorizers if applicable.
-    """
     model = load_trained_model(state["model_path"])
     X_text, y_true = load_dataset(
         state["dataset_path"], state["text_column"], state["label_column"]
     )
 
-    # Resolve vectorizer if provided or discoverable from Agent 1 graph
+    # Load the pipeline source code for V2 static scanning
+    pipeline_path = state.get("pipeline_path")
+    code = None
+    if pipeline_path and os.path.exists(pipeline_path):
+        with open(pipeline_path, "r", encoding="utf-8") as f:
+            code = f.read()
+
     vectorizer_path = state.get("vectorizer_path")
     if not vectorizer_path:
         base_dir = os.path.dirname(state["dataset_path"]) or "data"
@@ -38,50 +43,45 @@ def node_load_artifacts(state: TestingAgentState) -> Dict[str, Any]:
         "vectorizer_path": vectorizer_path,
         "X_text": X_text,
         "y_true": y_true,
+        "code": code,
     }
 
-
 def node_plan_tests(state: TestingAgentState) -> Dict[str, Any]:
-    """
-    Autonomous planning node: evaluates Agent 1 threat model and vulnerability
-    findings to determine which empirical test suites should be executed.
-    """
     agent_1 = state.get("agent_1_results")
     explicit_targets = state.get("test_targets")
     planned_tests: List[str] = []
     plan_log: List[str] = []
 
     if explicit_targets:
-        # User specified explicit test targets
         if any(t.upper() in ["V1", "POISONING", "DATA_POISONING"] for t in explicit_targets):
             planned_tests.append("V1_poisoning")
+        if any(t.upper() in ["V2", "PREPROCESSING"] for t in explicit_targets):
+            planned_tests.append("V2_preprocessing")
+        if any(t.upper() in ["V3", "VALIDATION"] for t in explicit_targets):
+            planned_tests.append("V3_validation")
         if any(t.upper() in ["V4", "ADVERSARIAL", "ADVERSARIAL_ROBUSTNESS"] for t in explicit_targets):
             planned_tests.append("V4_adversarial")
         plan_log.append(f"Planned tests from explicit targets: {planned_tests}")
     elif agent_1:
-        # Ingest Agent 1 findings to schedule targeted security tests
         vulns = agent_1.get("vulnerability_findings", {}).get("vulnerabilities", [])
         flagged_categories = {v.get("vulnerability_id"): v.get("category") for v in vulns}
 
         if "V1" in flagged_categories or any("poison" in str(c).lower() for c in flagged_categories.values()):
             planned_tests.append("V1_poisoning")
             plan_log.append("Scheduled V1_poisoning based on Agent 1 data poisoning finding.")
-
         if "V2" in flagged_categories or any("preprocess" in str(c).lower() for c in flagged_categories.values()):
             planned_tests.append("V2_preprocessing")
             plan_log.append("Scheduled V2_preprocessing based on Agent 1 preprocessing finding.")
-
         if "V3" in flagged_categories or any("validation" in str(c).lower() for c in flagged_categories.values()):
             planned_tests.append("V3_validation")
             plan_log.append("Scheduled V3_validation based on Agent 1 data validation finding.")
-
         if "V4" in flagged_categories or any("adversarial" in str(c).lower() for c in flagged_categories.values()):
             planned_tests.append("V4_adversarial")
             plan_log.append("Scheduled V4_adversarial based on Agent 1 adversarial robustness finding.")
     else:
-        # Standalone execution default: schedule all currently implemented tests
-        planned_tests = ["V1_poisoning", "V4_adversarial"]
-        plan_log.append("No upstream Agent 1 findings provided. Scheduling default test suite (V1, V4).")
+        # Fixed this line so it doesn't crash!
+        planned_tests = list(TEST_ORDER)
+        plan_log.append("No upstream Agent 1 findings provided. Scheduling full default test suite.")
 
     return {
         "planned_tests": planned_tests,
@@ -89,15 +89,8 @@ def node_plan_tests(state: TestingAgentState) -> Dict[str, Any]:
         "status": "tests_planned",
     }
 
-
-def route_after_planning(
-    state: TestingAgentState,
-) -> Literal["poisoning_test", "adversarial_test", "aggregate_results"]:
-    """
-    Conditional router: dispatches execution to the first scheduled test suite.
-    """
+def route_after_planning(state: TestingAgentState) -> Literal["poisoning_test", "adversarial_test", "preprocess_test", "validation_test", "aggregate_results"]:
     planned = state.get("planned_tests", [])
-
     if "V1_poisoning" in planned:
         return "poisoning_test"
     if "V4_adversarial" in planned:
@@ -108,24 +101,11 @@ def route_after_planning(
         return "validation_test"
     return "aggregate_results"
 
-    
-
-
 def node_poisoning_test(state: TestingAgentState) -> Dict[str, Any]:
-    """
-    Executes the empirical data poisoning evaluation module.
-    """
     return run_poisoning_test(state)
 
-
-def route_after_poisoning(
-    state: TestingAgentState,
-) -> Literal["adversarial_test", "aggregate_results"]:
-    """
-    Conditional router: advances to adversarial testing if scheduled, or aggregates results.
-    """
+def route_after_poisoning(state: TestingAgentState) -> Literal["adversarial_test", "preprocess_test", "validation_test", "aggregate_results"]:
     planned = state.get("planned_tests", [])
-
     if "V4_adversarial" in planned:
         return "adversarial_test"
     if "V2_preprocessing" in planned:
@@ -134,22 +114,30 @@ def route_after_poisoning(
         return "validation_test"
     return "aggregate_results"
 
-
 def node_adversarial_test(state: TestingAgentState) -> Dict[str, Any]:
-    """
-    Executes the empirical adversarial evasion evaluation module.
-    """
     return run_adversarial_test(state)
 
+# Added this routing function so it doesn't loop back to V1!
+def route_after_adversarial(state: TestingAgentState) -> Literal["preprocess_test", "validation_test", "aggregate_results"]:
+    planned = state.get("planned_tests", [])
+    if "V2_preprocessing" in planned:
+        return "preprocess_test"
+    if "V3_validation" in planned:
+        return "validation_test"
+    return "aggregate_results"
 
 def node_preprocess_test(state: TestingAgentState) -> Dict[str, Any]:
-    """Executes the empirical preprocessing security checks ."""
     return run_preprocess_checks(state)
 
-def node_validation_test(state: TestingAgentState) -> Dict[str, Any]:
-    """Executes the empirical data validation checks ."""
-    return run_validation_checks(state)
+# Added this routing function so it doesn't loop back to V1!
+def route_after_preprocess(state: TestingAgentState) -> Literal["validation_test", "aggregate_results"]:
+    planned = state.get("planned_tests", [])
+    if "V3_validation" in planned:
+        return "validation_test"
+    return "aggregate_results"
 
+def node_validation_test(state: TestingAgentState) -> Dict[str, Any]:
+    return run_validation_checks(state)
 
 def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
     """
@@ -164,8 +152,6 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
     if "poisoning_evidence" in state:
         poisoning = state["poisoning_evidence"]
         results.append(poisoning)
-
-        # Cross-verify against Agent 1 hypothesis
         if agent_1:
             drop = poisoning.get("evidence", {}).get("generic_test", {}).get("accuracy_drop", 0.0)
             verified = drop > 0.05
@@ -186,7 +172,6 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
     if "adversarial_evidence" in state:
         adversarial = state["adversarial_evidence"]
         results.append(adversarial)
-
         if agent_1:
             asr = adversarial.get("evidence", {}).get("attack_success_rate_within_budget", 0.0)
             verified = asr >= 0.3 if asr is not None else False
@@ -218,9 +203,7 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
             "vulnerability_name": "Preprocessing Attack Surface",
             "status": "not_tested",
             "severity": None,
-            "evidence": {
-                "reason": "Test module pending implementation by assigned team member."
-            },
+            "evidence": {"reason": "Test module pending implementation by assigned team member."},
         })
 
     if not state.get("validation_evidence"):
@@ -229,9 +212,7 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
             "vulnerability_name": "Data Validation Weaknesses",
             "status": "not_tested",
             "severity": None,
-            "evidence": {
-                "reason": "Test module pending implementation by assigned team member."
-            },
+            "evidence": {"reason": "Test module pending implementation by assigned team member."},
         })
 
     return {
@@ -246,13 +227,8 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
 
 
 def build_testing_agent_graph():
-    """
-    Assembles and compiles the StateGraph for Agent 2, establishing autonomous
-    test planning and conditional routing based on upstream Agent 1 findings.
-    """
     graph = StateGraph(TestingAgentState)
 
-    # Register workflow nodes
     graph.add_node("load_artifacts", node_load_artifacts)
     graph.add_node("plan_tests", node_plan_tests)
     graph.add_node("poisoning_test", node_poisoning_test)
@@ -261,36 +237,31 @@ def build_testing_agent_graph():
     graph.add_node("validation_test", node_validation_test)
     graph.add_node("aggregate_results", node_aggregate_results)
 
-    # Wire graph flow
     graph.set_entry_point("load_artifacts")
     graph.add_edge("load_artifacts", "plan_tests")
 
-    # Conditional dispatch based on test planning
     graph.add_conditional_edges(
-        "plan_tests",
-        route_after_planning,
-        {
-            "poisoning_test": "poisoning_test",
-            "adversarial_test": "adversarial_test",
-            "preprocess_test": "preprocess_test",
-            "validation_test": "validation_test",
-            "aggregate_results": "aggregate_results",
-        },
+        "plan_tests", route_after_planning,
+        {"poisoning_test": "poisoning_test", "adversarial_test": "adversarial_test", "preprocess_test": "preprocess_test", "validation_test": "validation_test", "aggregate_results": "aggregate_results"}
     )
 
     graph.add_conditional_edges(
-        "poisoning_test",
-        route_after_poisoning,
-        {
-            "adversarial_test": "adversarial_test",
-            "preprocess_test": "preprocess_test", 
-            "validation_test": "validation_test",
-            "aggregate_results": "aggregate_results",
-        },
+        "poisoning_test", route_after_poisoning,
+        {"adversarial_test": "adversarial_test", "preprocess_test": "preprocess_test", "validation_test": "validation_test", "aggregate_results": "aggregate_results"}
     )
 
-    graph.add_edge("adversarial_test", "preprocess_test")
-    graph.add_edge("preprocess_test", "validation_test")
+    # FIXED: Use route_after_adversarial here, not route_after_planning!
+    graph.add_conditional_edges(
+        "adversarial_test", route_after_adversarial,
+        {"preprocess_test": "preprocess_test", "validation_test": "validation_test", "aggregate_results": "aggregate_results"}
+    )
+
+    # FIXED: Use route_after_preprocess here, not route_after_planning!
+    graph.add_conditional_edges(
+        "preprocess_test", route_after_preprocess,
+        {"validation_test": "validation_test", "aggregate_results": "aggregate_results"}
+    )
+
     graph.add_edge("validation_test", "aggregate_results")
     graph.add_edge("aggregate_results", END)
 
