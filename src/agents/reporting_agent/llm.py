@@ -23,7 +23,7 @@ def get_llm(temperature: float = 0.2) -> ChatOpenAI:
 
     model_name = os.getenv(
         "OPENAI_MODEL_NAME",
-        "gpt-4o-mini",
+        "gpt-5.4-mini",
     )
 
     return ChatOpenAI(

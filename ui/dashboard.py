@@ -4,7 +4,11 @@ from typing import Any, Dict, List
 
 def escape(value: Any) -> str:
     return html.escape(
-        str(value if value is not None else "")
+        str(
+            value
+            if value is not None
+            else ""
+        )
     )
 
 
@@ -12,19 +16,45 @@ def category_score(
     findings: List[Dict[str, Any]],
     category: str,
 ) -> int:
+    """
+    Return the Agent 3 final risk score
+    for a vulnerability category on a
+    0-100 presentation scale.
+    """
+
     for finding in findings:
-        if finding.get("category") == category:
+        if (
+            finding.get("category")
+            == category
+        ):
             score = float(
-                finding.get("risk_score", 0)
+                finding.get(
+                    "final_risk_score",
+                    0,
+                )
             )
 
-            return int(score * 10)
+            return max(
+                0,
+                min(
+                    100,
+                    int(
+                        round(
+                            score * 10
+                        )
+                    ),
+                ),
+            )
 
     return 0
 
 
-def severity_class(severity: str) -> str:
-    severity = str(severity).lower()
+def severity_class(
+    severity: str
+) -> str:
+    severity = str(
+        severity
+    ).lower()
 
     if severity == "critical":
         return "severity-critical"
@@ -70,9 +100,13 @@ def pipeline_node(
     score: int,
 ) -> str:
 
-    flagged = score >= 50
+    flagged = score >= 40
 
-    flag_class = "flagged" if flagged else ""
+    flag_class = (
+        "flagged"
+        if flagged
+        else ""
+    )
 
     alert = (
         '<div class="node-alert">!</div>'
@@ -80,7 +114,11 @@ def pipeline_node(
         else ""
     )
 
-    trust = "partial" if flagged else "trusted"
+    trust = (
+        "review"
+        if flagged
+        else "lower risk"
+    )
 
     trust_class = (
         ""
@@ -108,7 +146,7 @@ def pipeline_node(
         </div>
 
         <div class="node-trust {trust_class}">
-            {trust}
+            {escape(trust)}
         </div>
 
     </div>
@@ -119,15 +157,15 @@ def finding_card(
     finding: Dict[str, Any]
 ) -> str:
 
-    severity = str(
+    final_severity = str(
         finding.get(
-            "severity",
+            "final_severity",
             "Low",
         )
     )
 
     severity_css = severity_class(
-        severity
+        final_severity
     )
 
     category = finding.get(
@@ -142,8 +180,14 @@ def finding_card(
 
     description = finding.get(
         "description",
-        "No root cause information available.",
+        (
+            "No root cause information "
+            "available."
+        ),
     )
+    description = str(description)
+    if len(description) > 220:
+        description = description[:217].rsplit(" ", 1)[0] + "..."
 
     recommendations = finding.get(
         "recommendations",
@@ -158,14 +202,60 @@ def finding_card(
             "appropriate security controls."
         )
 
-    status = finding.get(
-        "test_status",
-        "not_tested",
+    status = str(
+        finding.get(
+            "test_status",
+            "not_tested",
+        )
     )
 
-    dynamic_severity = finding.get(
-        "dynamic_severity",
-        "N/A",
+    dynamic_severity = (
+        finding.get(
+            "dynamic_severity"
+        )
+        or "N/A"
+    )
+
+    static_severity = str(
+        finding.get(
+            "static_severity",
+            "N/A",
+        )
+    )
+
+    static_score = float(
+        finding.get(
+            "static_risk_score",
+            0.0,
+        )
+    )
+
+    final_score = float(
+        finding.get(
+            "final_risk_score",
+            0.0,
+        )
+    )
+
+    final_likelihood = float(
+        finding.get(
+            "final_likelihood",
+            0.0,
+        )
+    )
+
+    correlation_status = str(
+        finding.get(
+            "correlation_status",
+            "Unverified",
+        )
+    )
+
+    correlation_rationale = str(
+        finding.get(
+            "correlation_rationale",
+            "",
+        )
     )
 
     return f"""
@@ -177,7 +267,9 @@ def finding_card(
                 severity
                 {severity_css}
             ">
-                {escape(severity.lower())}
+                {escape(
+                    final_severity.lower()
+                )}
             </span>
 
             <span class="finding-title">
@@ -188,9 +280,28 @@ def finding_card(
 
         <div class="finding-meta">
             {escape(vulnerability_id)}
-            · dynamic test: {escape(status)}
+            · final risk:
+            {final_score:.1f}/10
+            · dynamic test:
+            {escape(status)}
+        </div>
+
+        <div class="finding-meta">
+            static:
+            {static_score:.1f}/10
+            ({escape(static_severity)})
             · dynamic severity:
             {escape(dynamic_severity)}
+            · evidence-adjusted likelihood:
+            {final_likelihood:.1f}/10
+        </div>
+
+        <div class="finding-meta">
+            correlation:
+            <strong>
+                {escape(correlation_status)}
+            </strong>
+            · {escape(correlation_rationale)}
         </div>
 
         <div class="finding-grid">
@@ -224,11 +335,15 @@ def finding_card(
         <div class="tags">
 
             <span class="tag">
-                OWASP ML Security
+                {escape(correlation_status)}
             </span>
 
             <span class="tag">
-                NIST AI RMF
+                NIST-aligned risk assessment
+            </span>
+
+            <span class="tag">
+                Dynamic validation
             </span>
 
         </div>
@@ -238,7 +353,8 @@ def finding_card(
 
 
 def render_dashboard(
-    result: Dict[str, Any]
+    result: Dict[str, Any],
+    section: str = "full",
 ) -> str:
 
     report = result.get(
@@ -256,14 +372,22 @@ def render_dashboard(
         [],
     )
 
-    score = int(
-        float(
-            overall.get(
-                "overall_risk_score",
-                0,
-            )
-        )
-        * 10
+    score = max(
+        0,
+        min(
+            100,
+            int(
+                round(
+                    float(
+                        overall.get(
+                            "overall_risk_score",
+                            0,
+                        )
+                    )
+                    * 10
+                )
+            ),
+        ),
     )
 
     severity = str(
@@ -275,15 +399,41 @@ def render_dashboard(
 
     summary = report.get(
         "executive_summary",
-        "AegisML completed the ML security audit.",
+        (
+            "AegisML completed the "
+            "ML security audit."
+        ),
     )
 
-    vulnerable = sum(
-        1
-        for finding in findings
-        if finding.get(
-            "test_status"
-        ) == "vulnerable"
+    vulnerable = int(
+        overall.get(
+            "confirmed_findings",
+            sum(
+                1
+                for finding in findings
+                if str(
+                    finding.get(
+                        "test_status",
+                        ""
+                    )
+                ).lower()
+                == "vulnerable"
+            ),
+        )
+    )
+
+    false_positives = int(
+        overall.get(
+            "false_positive_findings",
+            0,
+        )
+    )
+
+    hidden_risks = int(
+        overall.get(
+            "hidden_risk_findings",
+            0,
+        )
     )
 
     issue_word = (
@@ -324,35 +474,37 @@ def render_dashboard(
             pipeline_node(
                 "📥",
                 "Data ingestion",
-                "dataset input",
+                "data poisoning assessment",
                 poisoning,
             ),
 
             pipeline_node(
                 "🧹",
                 "Preprocessing",
-                "pipeline transforms",
+                "preprocessing assessment",
                 preprocessing,
             ),
 
             pipeline_node(
                 "🧠",
-                "ML classifier",
-                "trained model",
+                "ML pipeline",
+                "data validation assessment",
                 validation,
             ),
 
             pipeline_node(
                 "🌐",
                 "Inference surface",
-                "adversarial testing",
+                "adversarial robustness assessment",
                 adversarial,
             ),
         ]
     )
 
     findings_html = "".join(
-        finding_card(finding)
+        finding_card(
+            finding
+        )
         for finding in findings
     )
 
@@ -363,7 +515,7 @@ def render_dashboard(
         </div>
         """
 
-    return f"""
+    summary_html = f"""
     <div class="aegis-dashboard">
 
         <div class="audit-header">
@@ -391,7 +543,6 @@ def render_dashboard(
 
         </div>
 
-
         <section class="summary">
 
             <div
@@ -409,15 +560,12 @@ def render_dashboard(
                     </div>
 
                     <div class="risk-caption">
-                        / 100 ·
-                        {escape(severity)}
-                        · static
+                        / 100 · {escape(severity)}
                     </div>
 
                 </div>
 
             </div>
-
 
             <div>
 
@@ -432,6 +580,12 @@ def render_dashboard(
                     {escape(summary)}
                 </div>
 
+                <div class="finding-meta">
+                    False positives:
+                    {false_positives}
+                    · Hidden risks:
+                    {hidden_risks}
+                </div>
 
                 <div class="risk-bars">
 
@@ -473,27 +627,11 @@ def render_dashboard(
 
         </section>
 
+    </div>
+    """
 
-        <div class="audit-tabs">
-
-            <div class="audit-tab">
-                Overview
-            </div>
-
-            <div class="audit-tab active">
-                Pipeline & findings
-            </div>
-
-            <div class="audit-tab">
-                Governance mapping
-            </div>
-
-            <div class="audit-tab">
-                Full report
-            </div>
-
-        </div>
-
+    content_html = f"""
+    <div class="aegis-dashboard">
 
         <section class="audit-content">
 
@@ -502,11 +640,11 @@ def render_dashboard(
                 <div class="pipeline-heading">
 
                     <span>
-                        Pipeline graph
+                        Security surfaces
                     </span>
 
                     <span>
-                        4 nodes
+                        4 categories
                     </span>
 
                 </div>
@@ -515,23 +653,21 @@ def render_dashboard(
                     {pipeline_html}
                 </div>
 
-
                 <div class="attacker-note">
 
                     <strong>
                         Attacker capability:
                     </strong>
 
-                    can influence pipeline input data
-                    and probe the model through
-                    adversarial inputs. Flagged nodes
-                    represent stages associated with
-                    security findings.
+                    The assessment considers attackers who may influence
+                    training data, submit malformed inputs, or query the
+                    inference surface. Flagged nodes indicate areas where
+                    the combined static and dynamic analysis found
+                    security-relevant evidence.
 
                 </div>
 
             </aside>
-
 
             <main>
                 {findings_html}
@@ -541,3 +677,11 @@ def render_dashboard(
 
     </div>
     """
+
+    if section == "summary":
+        return summary_html
+
+    if section == "content":
+        return content_html
+
+    return summary_html + content_html

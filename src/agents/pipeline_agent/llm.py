@@ -16,7 +16,7 @@ def get_llm(temperature: float = 0.2) -> ChatOpenAI:
             "OPENAI_API_KEY is not set. Please ensure it is defined in your environment or .env file."
         )
 
-    model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
+    model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-5.4-mini")
 
     return ChatOpenAI(
         api_key=api_key,

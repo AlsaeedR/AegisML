@@ -136,9 +136,9 @@ Open `.env` and set your OpenAI API key:
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-*Optional:* You can also configure the model (defaults to `gpt-4o-mini`):
+*Optional:* You can also configure the model (defaults to `gpt-5.4-mini`):
 ```env
-OPENAI_MODEL_NAME=gpt-4o-mini
+OPENAI_MODEL_NAME=gpt-5.4-mini
 ```
 
 ---

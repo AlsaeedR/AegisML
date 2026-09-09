@@ -4,14 +4,17 @@ from langgraph.graph import StateGraph, END
 
 from .state import ReportingAgentState
 from .report_builder import build_audit_report
+from .risk_scoring import calculate_final_risk
 
 
 def node_correlate_findings(
     state: ReportingAgentState
 ) -> Dict[str, Any]:
     """
-    Combine Agent 1 risk findings with Agent 2 dynamic
-    security test results using vulnerability IDs.
+    Combine Agent 1 static findings with Agent 2
+    dynamic security test results using
+    vulnerability IDs, then calculate the
+    final evidence-informed risk.
     """
 
     agent_1 = state.get(
@@ -47,9 +50,13 @@ def node_correlate_findings(
     )
 
     dynamic_by_id = {
-        result.get("vulnerability_id"): result
+        result.get(
+            "vulnerability_id"
+        ): result
         for result in dynamic_results
-        if result.get("vulnerability_id")
+        if result.get(
+            "vulnerability_id"
+        )
     }
 
     correlated_findings: List[
@@ -57,59 +64,114 @@ def node_correlate_findings(
     ] = []
 
     for static_finding in static_findings:
-        vulnerability_id = static_finding.get(
-            "vulnerability_id"
+        vulnerability_id = (
+            static_finding.get(
+                "vulnerability_id"
+            )
         )
 
-        dynamic_result = dynamic_by_id.get(
-            vulnerability_id,
-            {
-                "vulnerability_id": vulnerability_id,
-                "status": "not_tested",
-                "severity": None,
-                "evidence": {
-                    "reason": (
-                        "No matching Agent 2 result "
-                        "was available."
-                    )
+        dynamic_result = (
+            dynamic_by_id.get(
+                vulnerability_id,
+                {
+                    "vulnerability_id": (
+                        vulnerability_id
+                    ),
+                    "status": "not_tested",
+                    "severity": None,
+                    "evidence": {
+                        "reason": (
+                            "No matching Agent 2 "
+                            "result was available."
+                        )
+                    },
                 },
-            },
+            )
+        )
+
+        correlated_finding = {
+            "vulnerability_id": (
+                vulnerability_id
+            ),
+            "category": (
+                static_finding.get(
+                    "category"
+                )
+            ),
+
+            # Preserve Agent 1 output for
+            # traceability and comparison.
+            "static_risk_score": (
+                static_finding.get(
+                    "risk_score",
+                    0.0,
+                )
+            ),
+            "static_severity": (
+                static_finding.get(
+                    "severity",
+                    "Low",
+                )
+            ),
+            "static_score_rationale": (
+                static_finding.get(
+                    "score_rationale",
+                    "",
+                )
+            ),
+
+            "affected_components": (
+                static_finding.get(
+                    "affected_components",
+                    [],
+                )
+            ),
+
+            "description": (
+                static_finding.get(
+                    "description",
+                    "",
+                )
+            ),
+            "recommendations": (
+                static_finding.get(
+                    "recommendations",
+                    [],
+                )
+            ),
+
+            # Agent 2 dynamic evidence.
+            "test_status": (
+                dynamic_result.get(
+                    "status",
+                    "not_tested",
+                )
+            ),
+            "dynamic_severity": (
+                dynamic_result.get(
+                    "severity"
+                )
+            ),
+            "evidence": (
+                dynamic_result.get(
+                    "evidence",
+                    {},
+                )
+            ),
+        }
+
+        final_risk = (
+            calculate_final_risk(
+                correlated_finding
+            )
+        )
+
+        correlated_finding.update(
+            final_risk
         )
 
         correlated_findings.append(
-            {
-                "vulnerability_id": vulnerability_id,
-                "category": static_finding.get(
-                    "category"
-                ),
-                "risk_score": static_finding.get(
-                    "risk_score",
-                    0.0,
-                ),
-                "severity": static_finding.get(
-                    "severity",
-                    "Low",
-                ),
-                "description": static_finding.get(
-                    "description",
-                    "",
-                ),
-                "recommendations": static_finding.get(
-                    "recommendations",
-                    [],
-                ),
-                "test_status": dynamic_result.get(
-                    "status",
-                    "not_tested",
-                ),
-                "dynamic_severity": dynamic_result.get(
-                    "severity"
-                ),
-                "evidence": dynamic_result.get(
-                    "evidence",
-                    {},
-                ),
-            }
+            correlated_finding
         )
 
     log = list(
@@ -120,14 +182,23 @@ def node_correlate_findings(
     )
 
     log.append(
-        f"Correlated {len(correlated_findings)} "
-        "Agent 1 findings with Agent 2 results."
+        (
+            f"Correlated "
+            f"{len(correlated_findings)} "
+            "Agent 1 findings with Agent 2 "
+            "results and calculated final "
+            "evidence-informed risk scores."
+        )
     )
 
     return {
-        "correlated_findings": correlated_findings,
+        "correlated_findings": (
+            correlated_findings
+        ),
         "execution_log": log,
-        "status": "findings_correlated",
+        "status": (
+            "risk_scoring_completed"
+        ),
     }
 
 
@@ -135,7 +206,8 @@ def node_build_report(
     state: ReportingAgentState
 ) -> Dict[str, Any]:
     """
-    Generate the final structured security audit report.
+    Generate the final structured
+    security audit report.
     """
 
     report = build_audit_report(
@@ -153,7 +225,10 @@ def node_build_report(
     )
 
     log.append(
-        "Generated final AegisML security audit report."
+        (
+            "Generated final AegisML "
+            "security audit report."
+        )
     )
 
     return {
@@ -168,7 +243,8 @@ def node_build_report(
 
 def build_reporting_agent_graph():
     """
-    Assemble and compile the Reporting Agent workflow.
+    Assemble and compile the
+    Reporting Agent workflow.
     """
 
     graph = StateGraph(
