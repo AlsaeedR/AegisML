@@ -2,6 +2,7 @@ import json
 import os
 from src.agents.pipeline_agent.pipeline_agent import run_pipeline_agent
 from src.agents.testing_agent.testing_agent import run_testing_agent
+from src.agents.reporting_agent.reporting_agent import run_reporting_agent
 
 # ---------------------------------------------------------
 # Configuration: Target Pipeline and Evaluation Artifacts
@@ -34,7 +35,9 @@ print(json.dumps(agent_1_result.get("vulnerability_findings"), indent=2))
 # Guided by Agent 1's threat model and vulnerability findings
 # ---------------------------------------------------------
 if os.path.exists(model_path) and os.path.exists(dataset_path):
+
     print("\nExecuting Agent 2 (Vulnerability Testing Agent)...")
+
     agent_2_result = run_testing_agent(
         agent_1_results=agent_1_result,
         model_path=model_path,
@@ -45,9 +48,38 @@ if os.path.exists(model_path) and os.path.exists(dataset_path):
     )
 
     print("\n=== [AGENT 2] DYNAMIC TEST RESULTS ===")
-    print(json.dumps(agent_2_result.get("structured_test_results"), indent=2))
+
+    print(
+        json.dumps(
+            agent_2_result.get("structured_test_results"),
+            indent=2,
+        )
+    )
+
+# -----------------------------------------------------
+# Phase 3: Execute Agent 3 (Reporting Agent)
+# Combines Agent 1 findings with Agent 2 test results
+# -----------------------------------------------------
+
+    print("\nExecuting Agent 3 (Reporting Agent)...")
+
+    agent_3_result = run_reporting_agent(
+        agent_1_results=agent_1_result,
+        agent_2_results=agent_2_result,
+    )
+
+    print("\n=== [AGENT 3] FINAL SECURITY AUDIT REPORT ===")
+
+    print(
+        json.dumps(
+            agent_3_result.get("final_report"),
+            indent=2,
+        )
+    )
+
 else:
     print(
-        f"\nSkipping Agent 2 dynamic testing: evaluation artifacts not found "
+        f"\nSkipping Agent 2 and Agent 3: "
+        f"evaluation artifacts not found "
         f"('{model_path}' or '{dataset_path}')."
-    )
+)

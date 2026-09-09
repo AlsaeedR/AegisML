@@ -1,5 +1,9 @@
+import json
 from typing import Any, Dict, List
 
+from langchain_core.prompts import ChatPromptTemplate
+
+from .llm import get_llm
 from .schemas import AuditReport
 
 
@@ -20,7 +24,8 @@ def build_audit_report(
     )
 
     executive_summary = _build_executive_summary(
-        overall_risk
+        findings,
+        overall_risk,
     )
 
     report = {
@@ -130,23 +135,72 @@ def _collect_recommendations(
 
 
 def _build_executive_summary(
-    overall_risk: Dict[str, Any]
+    findings: List[Dict[str, Any]],
+    overall_risk: Dict[str, Any],
 ) -> str:
     """
-    Generate a concise executive summary.
+    Use the LLM to generate an executive summary
+    grounded in Agent 1 and Agent 2 results.
     """
 
-    return (
-        "AegisML completed static threat analysis and "
-        "dynamic security testing of the target machine "
-        "learning pipeline. "
-        f"The highest identified risk score is "
-        f"{overall_risk['overall_risk_score']}/10, "
-        f"with an overall "
-        f"{overall_risk['overall_severity']} risk level. "
-        f"The assessment includes "
-        f"{overall_risk['critical_findings']} Critical, "
-        f"{overall_risk['high_findings']} High, "
-        f"{overall_risk['medium_findings']} Medium, and "
-        f"{overall_risk['low_findings']} Low findings."
+    llm = get_llm()
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are the Reporting Agent in the "
+                "AegisML security auditing system. "
+                "Write one concise professional executive "
+                "summary for a security dashboard. "
+                "Use only the supplied overall risk data "
+                "and correlated security findings. "
+                "Keep the summary between 60 and 90 words "
+                "and write it as a single paragraph. "
+                "Start directly with the assessment. "
+                "Do not include a title, heading, label, "
+                "Markdown formatting, bullet points, "
+                "or phrases such as 'Executive Summary'. "
+                "Mention the overall risk level and score, "
+                "highlight the most important dynamically "
+                "confirmed vulnerability, and briefly "
+                "distinguish confirmed dynamic vulnerabilities "
+                "from findings that were not confirmed by testing. "
+                "For adversarial testing, use "
+                "attack_success_rate_within_budget when referring "
+                "to attack success rate. "
+                "When presenting rates or proportions from evidence, "
+                "convert decimal values such as 0.94 into percentages "
+                "such as 94% for readability. "
+                "Do not calculate, modify, or reinterpret "
+                "risk scores, severity levels, test statuses, "
+                "or evidence. "
+                "Do not invent findings or recommendations. "
+                "Return only the final summary paragraph."
+            ),
+            (
+                "user",
+                "OVERALL RISK:\n{overall_risk}\n\n"
+                "CORRELATED SECURITY FINDINGS:\n"
+                "{findings}\n\n"
+                "Write the executive summary."
+            ),
+        ]
     )
+
+    chain = prompt | llm
+
+    response = chain.invoke(
+        {
+            "overall_risk": json.dumps(
+                overall_risk,
+                indent=2,
+            ),
+            "findings": json.dumps(
+                findings,
+                indent=2,
+            ),
+        }
+    )
+
+    return response.content.strip()

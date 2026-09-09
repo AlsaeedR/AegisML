@@ -287,9 +287,9 @@ def render_dashboard(
     )
 
     issue_word = (
-        "issue needs"
+        "confirmed issue needs"
         if vulnerable == 1
-        else "issues need"
+        else "confirmed issues need"
     )
 
     poisoning = category_score(
@@ -409,7 +409,9 @@ def render_dashboard(
                     </div>
 
                     <div class="risk-caption">
-                        / 100 · {escape(severity)}
+                        / 100 ·
+                        {escape(severity)}
+                        · static
                     </div>
 
                 </div>
