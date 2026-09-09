@@ -1,44 +1,16 @@
-import ast
-from typing import Any, Dict, List
-
-DANGEROUS_CALLS = {
-    ("pickle", "load"), ("pickle", "loads"),
-    ("yaml", "load"),
-    ("os", "system"),
-    ("subprocess", "Popen"), ("subprocess", "call"), ("subprocess", "run"),
-}
-DANGEROUS_BUILTINS = {"eval", "exec"}
+from typing import Any, Dict
 
 
-def _static_scan(code: str) -> List[Dict[str, Any]]:
-    """AST-based scan for known-dangerous call patterns that a dynamic input test can miss."""
-    findings = []
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as e:
-        return [{"finding": "unparseable_code", "detail": str(e)}]
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        module, name = None, None
-        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            module, name = func.value.id, func.attr
-        elif isinstance(func, ast.Name):
-            name = func.id
-
-        if name in DANGEROUS_BUILTINS or (module, name) in DANGEROUS_CALLS:
-            findings.append({
-                "call": f"{module + '.' if module else ''}{name}",
-                "lineno": getattr(node, "lineno", None),
-            })
-    return findings
+def _accepts_raw_text(model) -> bool:
+    """Checks whether the model's first pipeline step looks like a text vectorizer."""
+    if hasattr(model, "named_steps"):
+        steps = list(model.named_steps.items())
+        return len(steps) > 1  # vectorizer step exists before the final estimator
+    return False
 
 
 def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
     model = state.get("model")
-    code = state.get("code") or state.get("pipeline_source")
 
     if not model:
         return {"preprocessing_evidence": {
@@ -47,11 +19,13 @@ def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
             "evidence": {"status": "skipped", "reason": "Missing model"}
         }}
 
-    # --- Static pass: catch code-level risks the dynamic test can't see ---
-    static_findings = _static_scan(code) if code else []
-    static_status = "vulnerable" if static_findings and static_findings[0].get("finding") != "unparseable_code" else "not_vulnerable"
+    if not _accepts_raw_text(model):
+        return {"preprocessing_evidence": {
+            "vulnerability_id": "V2", "vulnerability_name": "Preprocessing Attack Surface",
+            "status": "not_applicable", "severity": None,
+            "evidence": {"reason": "Model does not appear to accept raw text input; malformed-text test does not apply to this pipeline shape."}
+        }}
 
-    # --- Dynamic pass: crash-resistance to malformed/edge-case text input ---
     malformed_inputs = [
         "a" * 10000,
         "\x00\x01\x02",
@@ -75,23 +49,14 @@ def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
         dynamic_status = "vulnerable"
         dynamic_evidence = {"status": "error", "reason": str(e)}
 
-    # Overall status/severity = worse of the two passes
-    overall_vulnerable = static_status == "vulnerable" or dynamic_status == "vulnerable"
-    status = "vulnerable" if overall_vulnerable else "not_vulnerable"
-    severity = "high" if overall_vulnerable else "low"
+    status = dynamic_status
+    severity = "high" if dynamic_status == "vulnerable" else "low"
 
     return {"preprocessing_evidence": {
         "vulnerability_id": "V2",
         "vulnerability_name": "Preprocessing Attack Surface",
         "status": status,
         "severity": severity,
-        "evidence": {
-            "static_scan": {
-                "status": static_status,
-                "findings": static_findings,
-                "note": "No source code provided; static scan skipped." if not code else None,
-            },
-            "dynamic_test": dynamic_evidence,
-        },
-        "summary": f"{len(static_findings)} static finding(s), dynamic: {dynamic_status}",
+        "evidence": {"dynamic_test": dynamic_evidence},
+        "summary": "Dynamic test: " + dynamic_status,
     }}

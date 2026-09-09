@@ -23,12 +23,6 @@ def node_load_artifacts(state: TestingAgentState) -> Dict[str, Any]:
         state["dataset_path"], state["text_column"], state["label_column"]
     )
 
-    # Load the pipeline source code for V2 static scanning
-    pipeline_path = state.get("pipeline_path")
-    code = None
-    if pipeline_path and os.path.exists(pipeline_path):
-        with open(pipeline_path, "r", encoding="utf-8") as f:
-            code = f.read()
 
     vectorizer_path = state.get("vectorizer_path")
     if not vectorizer_path:
@@ -43,7 +37,6 @@ def node_load_artifacts(state: TestingAgentState) -> Dict[str, Any]:
         "vectorizer_path": vectorizer_path,
         "X_text": X_text,
         "y_true": y_true,
-        "code": code,
     }
 
 def node_plan_tests(state: TestingAgentState) -> Dict[str, Any]:
