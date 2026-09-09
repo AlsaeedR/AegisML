@@ -694,12 +694,6 @@ def render_dashboard(
                         <strong>Access:</strong>
                         {escape(attacker_access)}
                     </div>
-
-                    <div>
-                        Derived by Agent 1 from the uploaded pipeline's
-                        deployment context and threat model.
-                    </div>
-
                 </div>
 
             </aside>
