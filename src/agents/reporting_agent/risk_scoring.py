@@ -42,13 +42,13 @@ def severity_from_score(score: float) -> str:
     the AegisML severity scale.
     """
 
-    if score >= 8.0:
+    if score >= 7.5:
         return "Critical"
 
-    if score >= 6.0:
+    if score >= 5.0:
         return "High"
 
-    if score >= 4.0:
+    if score >= 2.5:
         return "Medium"
 
     return "Low"
