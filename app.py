@@ -840,8 +840,7 @@ st.markdown(
     }
 
     div[data-testid="stFileUploader"] {
-        background: #fafaf7;
-        border-radius: 10px;
+        background: transparent;
     }
 
     .stButton > button {
@@ -853,7 +852,19 @@ st.markdown(
     .stButton > button[kind="primary"] {
         border: none;
         background: #30342c;
-        color: white;
+        color: #fdfdfc;
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: 0.3px;
+        min-height: 48px;
+        box-shadow: 0 2px 6px rgba(48, 52, 44, 0.12);
+        transition: all 0.2s ease;
+    }
+
+    .stButton > button[kind="primary"]:hover {
+        background: #1f221c;
+        color: #ffffff;
+        box-shadow: 0 4px 14px rgba(48, 52, 44, 0.2);
     }
 
     .stDownloadButton > button {
@@ -909,81 +920,22 @@ if st.session_state.audit_result is None:
 
     st.html(
         """
-        <div style="
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 10px;
-        ">
-
-            <div style="
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                height: 42px;
-            ">
-
-                <span style="
-                    width: 9px;
-                    height: 9px;
-                    background: #30342c;
-                    border-radius: 50%;
-                    display: block;
-                "></span>
-
-                <span style="
-                    width: 13px;
-                    height: 2px;
-                    background: #a8aaa3;
-                    display: block;
-                "></span>
-
-                <span style="
-                    width: 11px;
-                    height: 11px;
-                    background: #4f8060;
-                    border-radius: 3px;
-                    display: block;
-                "></span>
-
-                <span style="
-                    width: 13px;
-                    height: 2px;
-                    background: #a8aaa3;
-                    display: block;
-                "></span>
-
-                <span style="
-                    width: 9px;
-                    height: 9px;
-                    background: #30342c;
-                    border-radius: 50%;
-                    display: block;
-                "></span>
-
+        <div class="upload-hero">
+            <div class="upload-hero-left">
+                <div class="upload-brand-row">
+                    <div class="upload-logo">A</div>
+                    <h1 class="upload-hero-title">AegisML Pipeline Audit</h1>
+                </div>
+                <p class="upload-hero-subtitle">
+                    Upload machine learning assets to run static threat analysis,
+                    dynamic security testing, and automated security reporting.
+                </p>
             </div>
-
-            <h1 style="
-                margin: 0;
-                padding: 0;
-                color: #30342c;
-                font-size: 38px;
-                font-weight: 700;
-                line-height: 1.1;
-            ">
-                AegisML Pipeline Audit
-            </h1>
-
+            <div class="upload-status-badge">
+                <span class="upload-status-dot"></span>
+                STANDBY &middot; READY TO AUDIT
+            </div>
         </div>
-
-        <p style="
-            margin: 0 0 28px 0;
-            color: #6f726a;
-            font-size: 17px;
-        ">
-            Upload your machine learning assets to run static threat analysis,
-            dynamic security testing, and automated security reporting.
-        </p>
         """
     )
 
@@ -997,50 +949,100 @@ if st.session_state.audit_result is None:
     )
 
     with col1:
-
-        pipeline_file = st.file_uploader(
-            "Pipeline source",
-            type=["py"],
-            help="Python ML pipeline source file.",
-        )
+        with st.container(border=True):
+            st.html(
+                """
+                <div class="asset-card-head">
+                    <div class="asset-card-title-wrap">
+                        <div class="asset-icon-box" style="font-family: monospace; font-size: 15px;">{ }</div>
+                        <div class="asset-title">Pipeline Source</div>
+                    </div>
+                    <span class="asset-target-tag tag-sast">AGENT 1 &middot; SAST</span>
+                </div>
+                <div class="asset-desc">
+                    Python ML pipeline source script defining component hierarchy, data transformations, and model definitions.
+                </div>
+                """
+            )
+            pipeline_file = st.file_uploader(
+                "Pipeline source",
+                type=["py"],
+                help="Python ML pipeline source file.",
+                label_visibility="collapsed",
+            )
 
     with col2:
-
-        model_file = st.file_uploader(
-            "Trained model",
-            type=["pkl"],
-            help="Pickle model generated by the ML pipeline.",
-        )
+        with st.container(border=True):
+            st.html(
+                """
+                <div class="asset-card-head">
+                    <div class="asset-card-title-wrap">
+                        <div class="asset-icon-box" style="font-family: monospace; font-size: 12px; font-weight: 700;">PKL</div>
+                        <div class="asset-title">Trained Model</div>
+                    </div>
+                    <span class="asset-target-tag tag-dast">AGENT 2 &middot; DAST</span>
+                </div>
+                <div class="asset-desc">
+                    Pickle serialized model artifact executed within an isolated environment for dynamic adversarial attacks.
+                </div>
+                """
+            )
+            model_file = st.file_uploader(
+                "Trained model",
+                type=["pkl"],
+                help="Pickle model generated by the ML pipeline.",
+                label_visibility="collapsed",
+            )
 
     with col3:
-
-        dataset_file = st.file_uploader(
-            "Dataset",
-            type=["csv"],
-            help="CSV dataset used by the model.",
-        )
+        with st.container(border=True):
+            st.html(
+                """
+                <div class="asset-card-head">
+                    <div class="asset-card-title-wrap">
+                        <div class="asset-icon-box" style="font-family: monospace; font-size: 12px; font-weight: 700;">CSV</div>
+                        <div class="asset-title">Evaluation Dataset</div>
+                    </div>
+                    <span class="asset-target-tag tag-data">TEST FIXTURE</span>
+                </div>
+                <div class="asset-desc">
+                    Evaluation dataset in tabular CSV format containing samples used to benchmark model accuracy and evasion.
+                </div>
+                """
+            )
+            dataset_file = st.file_uploader(
+                "Dataset",
+                type=["csv"],
+                help="CSV dataset used by the model.",
+                label_visibility="collapsed",
+            )
 
     st.write("")
 
     # -----------------------------------------------------
-    # Dataset settings
+    # Dataset settings (Collapsible Advanced Configuration)
     # -----------------------------------------------------
 
-    setting1, setting2 = st.columns(2)
-
-    with setting1:
-
-        text_column = st.text_input(
-            "Text column",
-            value="text",
+    with st.expander("Advanced Configuration · Schema Mapping", expanded=False):
+        st.caption(
+            "Specify dataset column names if your CSV does not use the default "
+            "'text' and 'label' headers."
         )
+        setting1, setting2 = st.columns(2)
 
-    with setting2:
+        with setting1:
+            text_column = st.text_input(
+                "Feature / Text Column",
+                value="text",
+                help="CSV column containing model input samples.",
+            )
 
-        label_column = st.text_input(
-            "Label column",
-            value="label",
-        )
+        with setting2:
+            label_column = st.text_input(
+                "Ground Truth / Label Column",
+                value="label",
+                help="CSV column containing class labels.",
+            )
 
     st.write("")
 
@@ -1049,7 +1051,7 @@ if st.session_state.audit_result is None:
     # -----------------------------------------------------
 
     if st.button(
-        "Run security audit",
+        "Run security audit  →",
         type="primary",
         use_container_width=True,
     ):
@@ -1148,6 +1150,38 @@ if st.session_state.audit_result is None:
                 st.error(
                     f"API error: {exc}"
                 )
+
+    # -----------------------------------------------------
+    # Pipeline workflow preview strip
+    # -----------------------------------------------------
+
+    st.html(
+        """
+        <div class="pipeline-workflow-strip">
+            <div class="workflow-step-card">
+                <div class="workflow-step-badge">Phase 01 &middot; SAST</div>
+                <div class="workflow-step-name">Static Threat Modeling</div>
+                <div class="workflow-step-desc">
+                    AST decomposition, component extraction, and qualitative NIST AI 100-2 threat modeling across pipeline nodes.
+                </div>
+            </div>
+            <div class="workflow-step-card">
+                <div class="workflow-step-badge">Phase 02 &middot; DAST</div>
+                <div class="workflow-step-name">Adversarial Testing Sandbox</div>
+                <div class="workflow-step-desc">
+                    Docker-isolated dynamic verification executing FGSM, PGD, HopSkipJump, and TextFooler attacks.
+                </div>
+            </div>
+            <div class="workflow-step-card">
+                <div class="workflow-step-badge">Phase 03 &middot; Reporting</div>
+                <div class="workflow-step-name">Evidence-Informed Scoring</div>
+                <div class="workflow-step-desc">
+                    Empirical verification synthesis, theoretical baseline vs. final risk calculation, and executive reporting.
+                </div>
+            </div>
+        </div>
+        """
+    )
 
 
 # =========================================================
