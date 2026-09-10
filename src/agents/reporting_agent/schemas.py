@@ -19,6 +19,12 @@ class ReportFinding(BaseModel):
     ]
 
     # Agent 1 theoretical/static assessment
+    static_impact: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=10,
+    )
+
     static_risk_score: float = Field(
         ge=0,
         le=10,
@@ -106,6 +112,11 @@ class OverallRiskSummary(BaseModel):
     )
 
     unverified_findings: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    not_applicable_findings: int = Field(
         default=0,
         ge=0,
     )
