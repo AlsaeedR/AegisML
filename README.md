@@ -65,10 +65,6 @@ AegisML/
 ├── ui/                               # Streamlit UI dashboard rendering modules and CSS
 │   ├── dashboard.py                  # Component renderers for pipeline topology & findings
 │   └── styles.css                    # Custom dashboard styling
-├── docs/                             # Technical architectural specifications
-│   ├── PIPELINE_AGENT_REPORT.md      # Agent 1 AST, threat modeling, and prompts documentation
-│   ├── AGENT2_REASONING_AND_COLLABORATION_REPORT.md # Agent 2 reasoning & risk scoring formulas
-│   └── AGENT2_SANDBOX_TRANSFORMATION_REPORT.md     # Docker sandbox transformation specification
 └── src/
     └── agents/
         ├── pipeline_agent/           # Agent 1
