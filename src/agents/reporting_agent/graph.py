@@ -99,27 +99,6 @@ def node_correlate_findings(
                 )
             ),
 
-            # Preserve Agent 1 output for
-            # traceability and comparison.
-            "static_risk_score": (
-                static_finding.get(
-                    "risk_score",
-                    0.0,
-                )
-            ),
-            "static_severity": (
-                static_finding.get(
-                    "severity",
-                    "Low",
-                )
-            ),
-            "static_score_rationale": (
-                static_finding.get(
-                    "score_rationale",
-                    "",
-                )
-            ),
-
             "affected_components": (
                 static_finding.get(
                     "affected_components",

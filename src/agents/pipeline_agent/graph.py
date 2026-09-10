@@ -1,6 +1,5 @@
 from typing import Dict, Any, Literal
 from langgraph.graph import StateGraph, END
-from .risk_score import calculate_risk_score
 
 from .state import PipelineAgentState
 from .tools import (
@@ -116,16 +115,10 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
         validation_errors=validation_errors,
     )
 
-    # Score the vulnerabilities using the threat model's deployment context,
-    # so existing_controls and affected_components actually influence the score.
-    deployment_context = threat_model.get("deployment_context")
-    scored_vulnerabilities = calculate_risk_score(
-        vulnerabilities_raw.get("vulnerabilities", []),
-        deployment_context,
-    )
-
+    # Agent 1 focuses purely on qualitative threat modeling and vulnerability identification.
+    # Mathematical risk scoring (both theoretical baseline and empirical) is centralized in Agent 3.
     return {
-        "vulnerability_findings": {"vulnerabilities": scored_vulnerabilities},
+        "vulnerability_findings": vulnerabilities_raw,
     }
 
 

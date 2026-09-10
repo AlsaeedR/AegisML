@@ -183,20 +183,52 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
 
     # 3. Process Preprocessing Results (V2)
     if "preprocessing_evidence" in state:
-        results.append(state["preprocessing_evidence"])
+        prep = state["preprocessing_evidence"]
+        results.append(prep)
+        if agent_1:
+            prep_status = prep.get("status", "not_tested")
+            verified = prep_status == "vulnerable"
+            verifications.append({
+                "vulnerability_id": "V2",
+                "category": "Preprocessing Attack Surface",
+                "hypothesis_confirmed": verified,
+                "dynamic_status": prep_status,
+                "assessment": (
+                    "Empirical test confirms Agent 1 hypothesis: model or preprocessing pipeline "
+                    "failed or exhibited vulnerability under malformed inputs."
+                    if verified
+                    else "Model successfully handled malformed and edge-case inputs without unhandled exceptions."
+                ),
+            })
 
     # 4. Process Validation Results (V3)
     if "validation_evidence" in state:
-        results.append(state["validation_evidence"])
+        val = state["validation_evidence"]
+        results.append(val)
+        if agent_1:
+            val_drop = val.get("evidence", {}).get("accuracy_drop", 0.0)
+            verified = val_drop > 0.05
+            verifications.append({
+                "vulnerability_id": "V3",
+                "category": "Data Validation Weaknesses",
+                "hypothesis_confirmed": verified,
+                "empirical_drop": val_drop,
+                "assessment": (
+                    f"Empirical test confirms Agent 1 hypothesis: model exhibited {val_drop * 100:.1f}% "
+                    "accuracy degradation under injected data corruption."
+                    if verified
+                    else "Model demonstrated empirical resilience against simulated data quality issues."
+                ),
+            })
 
-    # 5. Preserved placeholders (only if V2/V3 didn't run)
+    # 5. Preserved placeholders (only if V2/V3 were not scheduled or executed)
     if not state.get("preprocessing_evidence"):
         results.append({
             "vulnerability_id": "V2",
             "vulnerability_name": "Preprocessing Attack Surface",
             "status": "not_tested",
             "severity": None,
-            "evidence": {"reason": "Test module pending implementation by assigned team member."},
+            "evidence": {"reason": "Test was not scheduled or required artifacts were not provided."},
         })
 
     if not state.get("validation_evidence"):
@@ -205,7 +237,7 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
             "vulnerability_name": "Data Validation Weaknesses",
             "status": "not_tested",
             "severity": None,
-            "evidence": {"reason": "Test module pending implementation by assigned team member."},
+            "evidence": {"reason": "Test was not scheduled or required artifacts were not provided."},
         })
 
     return {

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 # Static risk context derived from the threat-modeling stage.
@@ -56,14 +56,12 @@ def severity_from_score(score: float) -> str:
 
 def _get_static_context(
     finding: Dict[str, Any],
-) -> Tuple[float, float]:
+) -> Tuple[float, float, str]:
     """
-    Get the initial impact and likelihood from
+    Get the initial impact, likelihood, and rationale from
     the static threat-modeling context.
 
-    Impact can be increased when several pipeline
-    components are affected, matching Agent 1's
-    existing contextual logic.
+    Impact is adjusted when multiple pipeline components are affected.
     """
 
     category = finding.get(
@@ -89,13 +87,22 @@ def _get_static_context(
         [],
     )
 
+    rationale = (
+        f"Theoretical baseline: impact {impact:.1f}/10, "
+        f"likelihood {likelihood:.1f}/10 for {category}"
+    )
+
     if len(affected_components) >= 3:
         impact = min(
             10.0,
             impact + 1.0,
         )
+        rationale += (
+            f"; impact adjusted to {impact:.1f}/10 "
+            f"({len(affected_components)} affected components)"
+        )
 
-    return impact, likelihood
+    return impact, likelihood, rationale
 
 
 def _dynamic_likelihood(
@@ -233,26 +240,30 @@ def _dynamic_likelihood(
 
 def _correlation_status(
     finding: Dict[str, Any],
+    static_severity_override: Optional[str] = None,
 ) -> Tuple[str, str]:
     """
-    Compare Agent 1's theoretical/static assessment
+    Compare the theoretical/static assessment
     with Agent 2's empirical test result.
 
     False Positive:
-        Agent 1 rates the finding High or Critical,
+        Theoretical severity is High or Critical,
         but Agent 2 does not confirm the vulnerability.
 
     Hidden Risk:
-        Agent 1 rates the finding Low,
+        Theoretical severity is Low,
         but Agent 2 dynamically confirms it.
     """
 
-    static_severity = str(
-        finding.get(
-            "static_severity",
-            "Low",
-        )
-    ).lower()
+    if static_severity_override:
+        static_severity = static_severity_override.lower()
+    else:
+        static_severity = str(
+            finding.get(
+                "static_severity",
+                "Low",
+            )
+        ).lower()
 
     test_status = str(
         finding.get(
@@ -328,28 +339,32 @@ def calculate_final_risk(
     finding: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Compute the final AegisML risk assessment.
+    Compute both the static baseline and the final empirical
+    AegisML risk assessment as the centralized scoring engine.
 
-    Final Risk =
-        Impact × Evidence-Adjusted Likelihood / 10
-
-    Agent 1 contributes the theoretical/static
-    threat context.
-
-    Agent 2 contributes empirical security
-    testing evidence.
-
-    Agent 3 correlates both assessments,
-    identifies discrepancies such as False
-    Positives and Hidden Risks, and calculates
-    the final evidence-informed risk.
+    Theoretical Risk = Impact × Static Likelihood / 10
+    Final Risk       = Impact × Evidence-Adjusted Likelihood / 10
     """
 
     (
         impact,
         static_likelihood,
+        static_score_rationale,
     ) = _get_static_context(
         finding
+    )
+
+    static_risk_score = round(
+        (
+            impact
+            * static_likelihood
+        )
+        / 10.0,
+        1,
+    )
+
+    static_severity = severity_from_score(
+        static_risk_score
     )
 
     (
@@ -364,7 +379,8 @@ def calculate_final_risk(
         correlation_status,
         correlation_rationale,
     ) = _correlation_status(
-        finding
+        finding,
+        static_severity_override=static_severity,
     )
 
     final_risk_score = round(
@@ -385,6 +401,18 @@ def calculate_final_risk(
 
         "static_likelihood": (
             static_likelihood
+        ),
+
+        "static_risk_score": (
+            static_risk_score
+        ),
+
+        "static_severity": (
+            static_severity
+        ),
+
+        "static_score_rationale": (
+            static_score_rationale
         ),
 
         "final_likelihood": round(
