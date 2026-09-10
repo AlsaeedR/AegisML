@@ -584,10 +584,25 @@ def build_pdf_report(
             )
         )
 
+        is_false_positive = "false positive" in correlation_status.lower() or (
+            final_severity.lower() == "low" and str(finding.get("test_status", "")).lower() == "not_vulnerable"
+        )
+        is_confirmed = "confirmed" in correlation_status.lower() or final_severity.lower() in ["critical", "high"]
+
+        if is_false_positive:
+            desc_label = "Theoretical Concern (Static SAST)"
+            recs_label = "Verification Outcome (Dynamic DAST)"
+        elif is_confirmed:
+            desc_label = "Root Cause & Description"
+            recs_label = "Suggested Fix & Remediation"
+        else:
+            desc_label = "Static Observation"
+            recs_label = "Hardening Guidance"
+
         if description:
             story.append(
                 Paragraph(
-                    "<b>Description</b>",
+                    f"<b>{desc_label}</b>",
                     small_style,
                 )
             )
@@ -716,7 +731,7 @@ def build_pdf_report(
         if recommendations:
             story.append(
                 Paragraph(
-                    "<b>Recommendations</b>",
+                    f"<b>{recs_label}</b>",
                     small_style,
                 )
             )

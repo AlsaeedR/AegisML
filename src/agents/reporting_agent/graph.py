@@ -112,12 +112,7 @@ def node_correlate_findings(
                     "",
                 )
             ),
-            "recommendations": (
-                static_finding.get(
-                    "recommendations",
-                    [],
-                )
-            ),
+            "recommendations": [],
 
             # Agent 2 dynamic evidence.
             "test_status": (

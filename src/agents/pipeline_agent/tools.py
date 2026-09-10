@@ -44,7 +44,7 @@ def validate_threat_model_schema(raw_data: Any) -> Tuple[bool, Optional[str], Op
 def validate_vulnerabilities_schema(raw_data: Any) -> Tuple[bool, Optional[str], Optional[VulnerabilitiesReport]]:
     """
     Tool wrapping Pydantic validation for the four MVP vulnerability findings.
-    Ensures all four vulnerability classes and remediation recommendations are populated.
+    Ensures all four vulnerability classes are populated.
     """
     try:
         validated = VulnerabilitiesReport.model_validate(raw_data)

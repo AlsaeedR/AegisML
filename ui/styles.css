@@ -545,6 +545,26 @@ body {
     font-family: monospace;
 }
 
+.verification-outcome {
+    min-height: 116px;
+    padding: 15px;
+    border-radius: 7px;
+    border: 1px solid #c7dcce;
+    background: #edf5ef;
+    color: #385a43;
+}
+
+.verification-outcome .box-title {
+    color: #436d4f;
+    font-weight: 600;
+}
+
+.verification-outcome .box-content {
+    font-size: 13px;
+    line-height: 1.65;
+    color: #33503b;
+}
+
 .tags {
     display: flex;
 

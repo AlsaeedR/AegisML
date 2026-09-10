@@ -86,7 +86,7 @@ class VulnerabilityFinding(BaseModel):
     ] = Field(description="Pipeline lifecycle stage affected by this vulnerability.")
     recommendations: List[str] = Field(
         default_factory=list,
-        description="Actionable, code-level remediation recommendations."
+        description="Actionable remediation recommendations (deferred to Agent 3 evidence synthesis)."
     )
     severity: Optional[str] = Field(
         default=None,
@@ -100,7 +100,7 @@ class VulnerabilityFinding(BaseModel):
 
 class VulnerabilitiesReport(BaseModel):
     """
-    Container for the four MVP vulnerability findings and their recommendations.
+    Container for the four MVP vulnerability findings identified through static threat analysis.
     """
     vulnerabilities: List[VulnerabilityFinding] = Field(
         description="Collection of findings for the four MVP vulnerability classes."

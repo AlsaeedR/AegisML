@@ -27,7 +27,7 @@ print(json.dumps(agent_1_result.get("pipeline_graph"), indent=2))
 print("\n=== [AGENT 1] THREAT MODEL (NIST AI 100-2e2025) ===")
 print(json.dumps(agent_1_result.get("threat_model"), indent=2))
 
-print("\n=== [AGENT 1] VULNERABILITY FINDINGS & RECOMMENDATIONS ===")
+print("\n=== [AGENT 1] VULNERABILITY FINDINGS (STATIC THREAT ANALYSIS) ===")
 print(json.dumps(agent_1_result.get("vulnerability_findings"), indent=2))
 
 # ---------------------------------------------------------

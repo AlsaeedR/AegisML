@@ -138,8 +138,8 @@ def generate_vulnerabilities_step(
     2. Preprocessing Attack Surface (V2)
     3. Data Validation Weaknesses (V3)
     4. Adversarial Robustness (V4)
-    Generates actionable remediation recommendations for each vulnerability.
-    Omits numerical risk scoring until dynamic testing results from Agent 2 become available.
+    Performs pure qualitative vulnerability identification and structural analysis.
+    Remediation recommendations and numerical risk scoring are deferred to Agent 3.
     """
     llm = get_llm()
     parser = JsonOutputParser(pydantic_object=VulnerabilitiesReport)
@@ -172,10 +172,10 @@ def generate_vulnerabilities_step(
             "For each of these four classes:\n"
             "- Map to the relevant nist_lifecycle_stage ('Data Ingestion', 'Preprocessing', 'Model Training', or 'Inference').\n"
             "- Identify the specific affected_components in the code.\n"
-            "- Provide a clear technical description of the vulnerability mechanism.\n"
-            "- Provide concrete, code-level recommendations to remediate the vulnerability.\n\n"
+            "- Provide a clear technical description of the vulnerability mechanism.\n\n"
             "IMPORTANT CONSTRAINTS:\n"
             "- Do NOT generate risk severity scores, likelihood scores, or risk rankings. Numerical risk scoring is deferred until Agent 2 empirical testing.\n"
+            "- Remediation recommendations are synthesized by Agent 3 using full empirical test evidence. Do not generate remediation recommendations here.\n"
             "- Ensure all 4 MVP vulnerability classes are present in the 'vulnerabilities' array.\n"
             "- Return valid JSON matching the schema instructions."
         ),

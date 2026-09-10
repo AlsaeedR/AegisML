@@ -258,6 +258,24 @@ def finding_card(
         )
     )
 
+    is_false_positive = "false positive" in correlation_status.lower() or (
+        final_severity.lower() == "low" and status == "not_vulnerable"
+    )
+    is_confirmed = "confirmed" in correlation_status.lower() or final_severity.lower() in ["critical", "high"]
+
+    if is_false_positive:
+        left_box_title = "Theoretical concern"
+        right_box_title = "Verification outcome"
+        right_box_class = "verification-outcome"
+    elif is_confirmed:
+        left_box_title = "Root cause"
+        right_box_title = "Suggested fix"
+        right_box_class = "suggested-fix"
+    else:
+        left_box_title = "Theoretical observation"
+        right_box_title = "Hardening guidance"
+        right_box_class = "suggested-fix"
+
     return f"""
     <div class="finding-card">
 
@@ -309,7 +327,7 @@ def finding_card(
             <div class="root-cause">
 
                 <div class="box-title">
-                    Root cause
+                    {escape(left_box_title)}
                 </div>
 
                 <div class="box-content">
@@ -318,10 +336,10 @@ def finding_card(
 
             </div>
 
-            <div class="suggested-fix">
+            <div class="{right_box_class}">
 
                 <div class="box-title">
-                    Suggested fix
+                    {escape(right_box_title)}
                 </div>
 
                 <div class="box-content">

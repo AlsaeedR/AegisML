@@ -12,7 +12,7 @@ def run_pipeline_agent(
 
     Takes the raw Python source code of a machine learning pipeline, constructs the
     structural execution graph using AST and NetworkX, derives a NIST AI 100-2e2025
-    threat model, identifies the four MVP vulnerabilities with recommendations,
+    threat model, identifies the four MVP vulnerabilities through static threat analysis,
     and runs self-correction loops via Pydantic validation.
 
     Parameters:
