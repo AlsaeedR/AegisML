@@ -68,6 +68,28 @@ def severity_class(
     return "severity-low"
 
 
+def risk_fill_class(score: int) -> str:
+    """Map the shared AegisML severity thresholds to dashboard bar classes."""
+    if score >= 50:
+        return "fill-red"
+    if score >= 25:
+        return "fill-gold"
+    return "fill-green"
+
+
+def category_test_status(
+    findings: List[Dict[str, Any]],
+    category: str,
+) -> str:
+    """Return the Agent 2 test status for a vulnerability category."""
+    for finding in findings:
+        if finding.get("category") == category:
+            return str(
+                finding.get("test_status", "not_tested")
+            ).lower()
+    return "not_tested"
+
+
 def risk_bar(
     title: str,
     score: int,
@@ -98,33 +120,27 @@ def pipeline_node(
     name: str,
     meta: str,
     score: int,
+    test_status: str = "not_tested",
 ) -> str:
 
-    flagged = score >= 40
+    normalized_status = str(test_status).lower()
 
-    flag_class = (
-        "flagged"
-        if flagged
-        else ""
-    )
+    if normalized_status == "not_applicable":
+        flagged = False
+        trust = "not applicable"
+        trust_class = ""
+    elif normalized_status in {"not_tested", "inconclusive", "error"}:
+        flagged = True
+        trust = "unverified"
+        trust_class = ""
+    else:
+        # Medium begins at 2.5/10 = 25/100 on the shared AegisML scale.
+        flagged = score >= 25
+        trust = "review" if flagged else "lower risk"
+        trust_class = "" if flagged else "trusted"
 
-    alert = (
-        '<div class="node-alert">!</div>'
-        if flagged
-        else ""
-    )
-
-    trust = (
-        "review"
-        if flagged
-        else "lower risk"
-    )
-
-    trust_class = (
-        ""
-        if flagged
-        else "trusted"
-    )
+    flag_class = "flagged" if flagged else ""
+    alert = '<div class="node-alert">!</div>' if flagged else ""
 
     return f"""
     <div class="pipeline-node {flag_class}">
@@ -162,6 +178,29 @@ def finding_card(
             "final_severity",
             "Low",
         )
+    )
+
+    status = str(
+        finding.get(
+            "test_status",
+            "not_tested",
+        )
+    )
+
+    correlation_status = str(
+        finding.get(
+            "correlation_status",
+            "Unverified",
+        )
+    )
+
+    display_severity = (
+        "Not Applicable"
+        if (
+            status.lower() == "not_applicable"
+            or correlation_status.lower() == "not applicable"
+        )
+        else final_severity
     )
 
     severity_css = severity_class(
@@ -202,13 +241,6 @@ def finding_card(
             "appropriate security controls."
         )
 
-    status = str(
-        finding.get(
-            "test_status",
-            "not_tested",
-        )
-    )
-
     dynamic_severity = (
         finding.get(
             "dynamic_severity"
@@ -222,6 +254,9 @@ def finding_card(
             "N/A",
         )
     )
+
+    static_impact = finding.get("static_impact")
+    static_likelihood = finding.get("static_likelihood")
 
     static_score = float(
         finding.get(
@@ -244,13 +279,6 @@ def finding_card(
         )
     )
 
-    correlation_status = str(
-        finding.get(
-            "correlation_status",
-            "Unverified",
-        )
-    )
-
     correlation_rationale = str(
         finding.get(
             "correlation_rationale",
@@ -258,10 +286,23 @@ def finding_card(
         )
     )
 
+    static_context_text = ""
+    if static_impact is not None and static_likelihood is not None:
+        try:
+            static_context_text = (
+                f" · static impact: {float(static_impact):.1f}/10"
+                f" · static likelihood: {float(static_likelihood):.1f}/10"
+            )
+        except (TypeError, ValueError):
+            static_context_text = ""
+
     is_false_positive = "false positive" in correlation_status.lower() or (
-        final_severity.lower() == "low" and status == "not_vulnerable"
+        final_severity.lower() == "low" and status.lower() == "not_vulnerable"
     )
-    is_confirmed = "confirmed" in correlation_status.lower() or final_severity.lower() in ["critical", "high"]
+    is_confirmed = (
+        "confirmed" in correlation_status.lower()
+        or final_severity.lower() in ["critical", "high"]
+    )
 
     if is_false_positive:
         left_box_title = "Theoretical concern"
@@ -286,7 +327,7 @@ def finding_card(
                 {severity_css}
             ">
                 {escape(
-                    final_severity.lower()
+                    display_severity.lower()
                 )}
             </span>
 
@@ -308,6 +349,7 @@ def finding_card(
             static:
             {static_score:.1f}/10
             ({escape(static_severity)})
+            {static_context_text}
             · dynamic severity:
             {escape(dynamic_severity)}
             · evidence-adjusted likelihood:
@@ -475,11 +517,36 @@ def render_dashboard(
         )
     )
 
-    issue_word = (
-        "confirmed issue needs"
-        if vulnerable == 1
-        else "confirmed issues need"
+    unverified = int(
+        overall.get(
+            "unverified_findings",
+            sum(
+                1
+                for finding in findings
+                if str(finding.get("correlation_status", "")).lower() == "unverified"
+            ),
+        )
     )
+
+    not_applicable = int(
+        overall.get(
+            "not_applicable_findings",
+            sum(
+                1
+                for finding in findings
+                if str(finding.get("correlation_status", "")).lower() == "not applicable"
+            ),
+        )
+    )
+
+    if vulnerable == 0:
+        issue_heading = (
+            "No dynamically confirmed issues require attention before this pipeline ships"
+        )
+    elif vulnerable == 1:
+        issue_heading = "1 confirmed issue needs attention before this pipeline ships"
+    else:
+        issue_heading = f"{vulnerable} confirmed issues need attention before this pipeline ships"
 
     poisoning = category_score(
         findings,
@@ -501,6 +568,11 @@ def render_dashboard(
         "Preprocessing Attack Surface",
     )
 
+    poisoning_status = category_test_status(findings, "Data Poisoning")
+    adversarial_status = category_test_status(findings, "Adversarial Robustness")
+    validation_status = category_test_status(findings, "Data Validation Weaknesses")
+    preprocessing_status = category_test_status(findings, "Preprocessing Attack Surface")
+
     ring_background = (
         "conic-gradient("
         f"#a27d31 {score}%, "
@@ -515,6 +587,7 @@ def render_dashboard(
                 "Data ingestion",
                 "data poisoning assessment",
                 poisoning,
+                poisoning_status,
             ),
 
             pipeline_node(
@@ -522,6 +595,7 @@ def render_dashboard(
                 "Preprocessing",
                 "preprocessing assessment",
                 preprocessing,
+                preprocessing_status,
             ),
 
             pipeline_node(
@@ -529,6 +603,7 @@ def render_dashboard(
                 "ML pipeline",
                 "data validation assessment",
                 validation,
+                validation_status,
             ),
 
             pipeline_node(
@@ -536,6 +611,7 @@ def render_dashboard(
                 "Inference surface",
                 "adversarial robustness assessment",
                 adversarial,
+                adversarial_status,
             ),
         ]
     )
@@ -609,10 +685,7 @@ def render_dashboard(
             <div>
 
                 <div class="summary-heading">
-                    {vulnerable}
-                    {issue_word}
-                    attention before this
-                    pipeline ships
+                    {escape(issue_heading)}
                 </div>
 
                 <div class="summary-text">
@@ -624,6 +697,10 @@ def render_dashboard(
                     {false_positives}
                     · Hidden risks:
                     {hidden_risks}
+                    · Unverified:
+                    {unverified}
+                    · Not applicable:
+                    {not_applicable}
                 </div>
 
                 <div class="risk-bars">
@@ -632,7 +709,7 @@ def render_dashboard(
                         risk_bar(
                             "Poisoning",
                             poisoning,
-                            "fill-red",
+                            risk_fill_class(poisoning),
                         )
                     }
 
@@ -640,7 +717,7 @@ def render_dashboard(
                         risk_bar(
                             "Adversarial robustness",
                             adversarial,
-                            "fill-gold",
+                            risk_fill_class(adversarial),
                         )
                     }
 
@@ -648,7 +725,7 @@ def render_dashboard(
                         risk_bar(
                             "Validation weakness",
                             validation,
-                            "fill-gold",
+                            risk_fill_class(validation),
                         )
                     }
 
@@ -656,7 +733,7 @@ def render_dashboard(
                         risk_bar(
                             "Preprocessing surface",
                             preprocessing,
-                            "fill-green",
+                            risk_fill_class(preprocessing),
                         )
                     }
 

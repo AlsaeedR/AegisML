@@ -74,33 +74,53 @@ def _get_static_context(
         STATIC_RISK_PROFILE["default"],
     )
 
-    impact = float(
-        profile["impact"]
-    )
+    supplied_impact = finding.get("static_impact")
+    supplied_likelihood = finding.get("static_likelihood")
 
-    likelihood = float(
-        profile["likelihood"]
-    )
-
-    affected_components = finding.get(
-        "affected_components",
-        [],
-    )
-
-    rationale = (
-        f"Theoretical baseline: impact {impact:.1f}/10, "
-        f"likelihood {likelihood:.1f}/10 for {category}"
-    )
-
-    if len(affected_components) >= 3:
-        impact = min(
-            10.0,
-            impact + 1.0,
+    try:
+        impact = (
+            max(0.0, min(10.0, float(supplied_impact)))
+            if supplied_impact is not None
+            else float(profile["impact"])
         )
-        rationale += (
-            f"; impact adjusted to {impact:.1f}/10 "
-            f"({len(affected_components)} affected components)"
+    except (TypeError, ValueError):
+        impact = float(profile["impact"])
+
+    try:
+        likelihood = (
+            max(0.0, min(10.0, float(supplied_likelihood)))
+            if supplied_likelihood is not None
+            else float(profile["likelihood"])
         )
+    except (TypeError, ValueError):
+        likelihood = float(profile["likelihood"])
+
+    if supplied_impact is not None or supplied_likelihood is not None:
+        rationale = (
+            f"Static threat context: impact {impact:.1f}/10, "
+            f"likelihood {likelihood:.1f}/10 for {category}; "
+            "available Agent 1 static values were preserved."
+        )
+    else:
+        affected_components = finding.get(
+            "affected_components",
+            [],
+        )
+
+        rationale = (
+            f"Theoretical baseline: impact {impact:.1f}/10, "
+            f"likelihood {likelihood:.1f}/10 for {category}"
+        )
+
+        if len(affected_components) >= 3:
+            impact = min(
+                10.0,
+                impact + 1.0,
+            )
+            rationale += (
+                f"; impact adjusted to {impact:.1f}/10 "
+                f"({len(affected_components)} affected components)"
+            )
 
     return impact, likelihood, rationale
 
