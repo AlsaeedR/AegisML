@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from .llm import get_llm
+from src.core.llm import get_llm
 from .schemas import AuditReport
 
 

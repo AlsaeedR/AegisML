@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-from .llm import get_llm
+from src.core.llm import get_llm
 from .schemas import ThreatModel, VulnerabilitiesReport
 
 

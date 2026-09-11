@@ -19,21 +19,32 @@ class TestingAgentState(TypedDict, total=False):
     label_column: str
     test_targets: Optional[List[str]]
 
-    # In-memory models and data
+    # Safe Host-Side Metadata
+    dataset_profile: Optional[Dict[str, Any]]
+
+    # Cognitive Strategy Reasoning (LLM + LangChain Tools)
+    attack_strategy_plan: Optional[Dict[str, Any]]
+    planned_tests: List[str]
+    execution_plan_log: List[str]
+
+    # In-memory models and data (loaded inside sandbox or container)
     model: Any
     vectorizer: Optional[Any]
     X_text: List[str]
     y_true: List[Any]
 
-    # Dynamic execution planning and reasoning log
-    planned_tests: List[str]
-    execution_plan_log: List[str]
+    # Sandbox Dispatcher & Telemetry
+    sandbox_status: str  # "executed", "skipped_zero_trust", "error"
+    sandbox_telemetry: Optional[Dict[str, Any]]
 
     # Empirical test evidence for MVP vulnerabilities
     poisoning_evidence: Dict[str, Any]
     adversarial_evidence: Dict[str, Any]
     preprocessing_evidence: Dict[str, Any]
     validation_evidence: Dict[str, Any]
+
+    # Post-Attack Forensic Diagnosis (LLM Reasoning)
+    forensic_analysis: Optional[Dict[str, Any]]
 
     # Final aggregated results and cross-verification against Agent 1 hypotheses
     hypothesis_verifications: List[Dict[str, Any]]
