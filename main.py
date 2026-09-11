@@ -7,7 +7,7 @@ from src.agents.reporting_agent.reporting_agent import run_reporting_agent
 # ---------------------------------------------------------
 # Configuration: Target Pipeline and Evaluation Artifacts
 # ---------------------------------------------------------
-target_pipeline_path = os.path.join("data", "21011088.py")
+target_pipeline_path = os.path.join("data", "pipeline.py")
 model_path = os.path.join("data", "model.pkl")
 dataset_path = os.path.join("data", "dataset.csv")
 

@@ -3,8 +3,11 @@ from typing import Any, Dict, List
 from langgraph.graph import StateGraph, END
 
 from .state import ReportingAgentState
-from .report_builder import build_audit_report
-from .risk_scoring import calculate_final_risk
+from .tools import (
+    score_finding_tool,
+    compile_audit_report_tool,
+    validate_audit_report_schema,
+)
 
 
 def node_correlate_findings(
@@ -135,7 +138,7 @@ def node_correlate_findings(
         }
 
         final_risk = (
-            calculate_final_risk(
+            score_finding_tool(
                 correlated_finding
             )
         )
@@ -181,15 +184,26 @@ def node_build_report(
 ) -> Dict[str, Any]:
     """
     Generate the final structured
-    security audit report.
+    security audit report using reporting tools.
     """
 
-    report = build_audit_report(
+    raw_report = compile_audit_report_tool(
         state.get(
             "correlated_findings",
             [],
         )
     )
+
+    is_valid, validation_errors, validated_report = (
+        validate_audit_report_schema(raw_report)
+    )
+
+    if not is_valid or validated_report is None:
+        raise ValueError(
+            f"Audit report validation failed:\n{validation_errors}"
+        )
+
+    report = validated_report.model_dump()
 
     log = list(
         state.get(
@@ -200,7 +214,7 @@ def node_build_report(
 
     log.append(
         (
-            "Generated final AegisML "
+            "Generated and validated final AegisML "
             "security audit report."
         )
     )
