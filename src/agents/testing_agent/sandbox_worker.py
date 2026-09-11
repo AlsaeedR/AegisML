@@ -74,45 +74,41 @@ def execute_worker():
         vectorizer = load_vectorizer(vectorizer_path)
         execution_log.append("Artifacts loaded successfully.")
 
+        test_state = {
+            "model": model,
+            "vectorizer": vectorizer,
+            "X_text": X_text,
+            "y_true": y_true,
+            "pipeline_path": pipeline_path if os.path.exists(pipeline_path) else None,
+            "adversarial_config": adv_config,
+            "poisoning_config": poison_config,
+        }
+
         # V1: Data Poisoning
         if "V1_poisoning" in planned_tests:
             execution_log.append("Executing V1_poisoning test...")
-            poison_res = run_poisoning_test(model, X_text, y_true, vectorizer=vectorizer)
+            poison_res = run_poisoning_test(test_state)
             results["poisoning_evidence"] = poison_res.get("poisoning_evidence", {})
             execution_log.append(f"V1 complete: {results['poisoning_evidence'].get('status')}")
 
         # V4: Adversarial Robustness
         if "V4_adversarial" in planned_tests:
             execution_log.append("Executing V4_adversarial attack test...")
-            sample_size = adv_config.get("sample_size", 50)
-            max_rel_budget = adv_config.get("max_relative_perturbation_budget", 0.5)
-            adv_res = run_adversarial_test(
-                model=model,
-                X_text=X_text,
-                y_true=y_true,
-                vectorizer=vectorizer,
-                n_samples=sample_size,
-                max_relative_perturbation_budget=max_rel_budget,
-            )
+            adv_res = run_adversarial_test(test_state)
             results["adversarial_evidence"] = adv_res.get("adversarial_evidence", {})
             execution_log.append(f"V4 complete: {results['adversarial_evidence'].get('status')}")
 
         # V2: Preprocessing Attack Surface
         if "V2_preprocessing" in planned_tests:
             execution_log.append("Executing V2_preprocessing test...")
-            prep_state = {
-                "model": model,
-                "vectorizer": vectorizer,
-                "pipeline_path": pipeline_path if os.path.exists(pipeline_path) else None,
-            }
-            prep_res = run_preprocess_checks(prep_state)
+            prep_res = run_preprocess_checks(test_state)
             results["preprocessing_evidence"] = prep_res.get("preprocessing_evidence", {})
             execution_log.append(f"V2 complete: {results['preprocessing_evidence'].get('status')}")
 
         # V3: Data Validation Weaknesses
         if "V3_validation" in planned_tests:
             execution_log.append("Executing V3_validation test...")
-            val_res = run_validation_checks(model, X_text, y_true, vectorizer=vectorizer)
+            val_res = run_validation_checks(test_state)
             results["validation_evidence"] = val_res.get("validation_evidence", {})
             execution_log.append(f"V3 complete: {results['validation_evidence'].get('status')}")
 
@@ -134,7 +130,7 @@ def execute_worker():
 def _write_output(output_path: str, data: Dict[str, Any]):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, default=str)
 
 
 if __name__ == "__main__":

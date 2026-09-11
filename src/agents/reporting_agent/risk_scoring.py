@@ -74,6 +74,16 @@ def _get_static_context(
         STATIC_RISK_PROFILE["default"],
     )
 
+    status = str(finding.get("status", "vulnerable")).strip().lower()
+    controls = finding.get("mitigating_controls", [])
+
+    if status == "not_applicable":
+        return (
+            0.0,
+            0.0,
+            f"Static threat evaluation: {category} is not applicable to the evaluated pipeline architecture.",
+        )
+
     supplied_impact = finding.get("static_impact")
     supplied_likelihood = finding.get("static_likelihood")
 
@@ -95,7 +105,15 @@ def _get_static_context(
     except (TypeError, ValueError):
         likelihood = float(profile["likelihood"])
 
-    if supplied_impact is not None or supplied_likelihood is not None:
+    if status == "mitigated":
+        # Defended control reduces static likelihood significantly
+        likelihood = min(likelihood, 2.5)
+        controls_desc = f" ({', '.join(controls)})" if controls else ""
+        rationale = (
+            f"Static threat evaluation: impact {impact:.1f}/10, likelihood {likelihood:.1f}/10 for {category}; "
+            f"mitigated by observed security controls{controls_desc}."
+        )
+    elif supplied_impact is not None or supplied_likelihood is not None:
         rationale = (
             f"Static threat context: impact {impact:.1f}/10, "
             f"likelihood {likelihood:.1f}/10 for {category}; "
@@ -271,9 +289,11 @@ def _correlation_status(
         but Agent 2 does not confirm the vulnerability.
 
     Hidden Risk:
-        Theoretical severity is Low,
-        but Agent 2 dynamically confirms it.
+        Theoretical severity is Low or status is 'mitigated',
+        but Agent 2 dynamically confirms the vulnerability.
     """
+
+    static_status = str(finding.get("status", "vulnerable")).strip().lower()
 
     if static_severity_override:
         static_severity = static_severity_override.lower()
@@ -291,6 +311,41 @@ def _correlation_status(
             "not_tested",
         )
     ).lower()
+
+    if static_status == "not_applicable" or test_status == "not_applicable":
+        return (
+            "Not Applicable",
+            (
+                "Static and/or dynamic analysis determined that this "
+                "threat class is not applicable to the pipeline."
+            ),
+        )
+
+    if static_status == "mitigated":
+        if test_status == "vulnerable":
+            return (
+                "Hidden Risk",
+                (
+                    "Agent 1 identified mitigating controls, but Agent 2 "
+                    "empirical testing successfully bypassed them and confirmed "
+                    "the vulnerability."
+                ),
+            )
+        if test_status == "not_vulnerable":
+            return (
+                "Defended / Mitigated",
+                (
+                    "Agent 1 identified mitigating controls, and Agent 2 "
+                    "empirical testing confirmed the defenses resisted attack."
+                ),
+            )
+        return (
+            "Mitigated",
+            (
+                "Agent 1 identified mitigating controls protecting this "
+                "component from static threat exposure."
+            ),
+        )
 
     if (
         static_severity
@@ -334,15 +389,6 @@ def _correlation_status(
             (
                 "Agent 2 did not confirm the vulnerability "
                 "during dynamic testing."
-            ),
-        )
-
-    if test_status == "not_applicable":
-        return (
-            "Not Applicable",
-            (
-                "Agent 2 determined that the vulnerability "
-                "is not applicable to this pipeline."
             ),
         )
 
@@ -416,8 +462,28 @@ def calculate_final_risk(
         final_risk_score
     )
 
+    # Post-testing review of mitigating controls against empirical evidence
+    controls = finding.get("mitigating_controls", [])
+    static_status = str(finding.get("status", "vulnerable")).strip().lower()
+    test_status = str(finding.get("test_status", "not_tested")).strip().lower()
+
+    if not controls:
+        control_verdict = "none"
+    elif static_status == "not_applicable" or test_status == "not_applicable":
+        control_verdict = "not_applicable"
+    elif test_status == "not_vulnerable":
+        control_verdict = "verified_effective"
+    elif test_status == "vulnerable":
+        if static_status == "mitigated":
+            control_verdict = "bypassed"
+        else:
+            control_verdict = "ineffective"
+    else:
+        control_verdict = "unverified"
+
     return {
         "impact": impact,
+        "control_verdict": control_verdict,
 
         "static_likelihood": (
             static_likelihood

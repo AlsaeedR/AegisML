@@ -12,6 +12,14 @@ def escape(value: Any) -> str:
     )
 
 
+KNOWLEDGE_EXPLANATIONS = {
+    "black-box": "External API query access only; zero code or model visibility.",
+    "grey-box": "Partial knowledge (features or model family known, no model weights).",
+    "white-box": "Full access to pipeline code, architecture, and trained weights.",
+    "supply-chain": "Upstream access to third-party datasets, packages, or base models.",
+}
+
+
 def category_score(
     findings: List[Dict[str, Any]],
     category: str,
@@ -225,8 +233,6 @@ def finding_card(
         ),
     )
     description = str(description)
-    if len(description) > 220:
-        description = description[:217].rsplit(" ", 1)[0] + "..."
 
     recommendations = finding.get(
         "recommendations",
@@ -296,25 +302,73 @@ def finding_card(
         except (TypeError, ValueError):
             static_context_text = ""
 
-    is_false_positive = "false positive" in correlation_status.lower() or (
-        final_severity.lower() == "low" and status.lower() == "not_vulnerable"
-    )
-    is_confirmed = (
-        "confirmed" in correlation_status.lower()
-        or final_severity.lower() in ["critical", "high"]
-    )
+    correlation_lower = correlation_status.lower()
 
-    if is_false_positive:
-        left_box_title = "Theoretical concern"
-        right_box_title = "Verification outcome"
+    # Post-testing review of mitigating controls against empirical evidence
+    mitigating_controls = finding.get("mitigating_controls", [])
+    control_verdict = finding.get("control_verdict")
+
+    if not control_verdict:
+        if not mitigating_controls:
+            control_verdict = "none"
+        elif "mitigated" in correlation_lower:
+            control_verdict = "verified_effective"
+        elif "hidden risk" in correlation_lower:
+            control_verdict = "bypassed"
+        elif status.lower() == "vulnerable":
+            control_verdict = "ineffective"
+        else:
+            control_verdict = "verified_effective" if status.lower() == "not_vulnerable" else "none"
+
+    controls_meta_html = ""
+    if mitigating_controls:
+        controls_str = ", ".join(mitigating_controls)
+        if control_verdict == "verified_effective" or "mitigated" in correlation_lower:
+            controls_meta_html = f"""
+            <div class="finding-meta" style="color: #15803d;">
+                verified active controls:
+                <strong>{escape(controls_str)}</strong>
+            </div>
+            """
+        elif control_verdict == "bypassed" or "hidden risk" in correlation_lower:
+            controls_meta_html = f"""
+            <div class="finding-meta" style="color: #c2410c;">
+                bypassed controls (failed under penetration testing):
+                <strong>{escape(controls_str)}</strong>
+            </div>
+            """
+        elif "confirmed" in correlation_lower or status.lower() == "vulnerable":
+            controls_meta_html = f"""
+            <div class="finding-meta" style="color: #64748b;">
+                ineffective checks observed in code:
+                {escape(controls_str)}
+            </div>
+            """
+
+    # Context-aware box titles
+    if "mitigated" in correlation_lower:
+        left_box_title = "Evaluated Threat Surface"
+        right_box_title = "Verified Defense"
         right_box_class = "verification-outcome"
-    elif is_confirmed:
-        left_box_title = "Root cause"
-        right_box_title = "Suggested fix"
+    elif "false positive" in correlation_lower:
+        left_box_title = "Theoretical Concern"
+        right_box_title = "Refutation Outcome"
+        right_box_class = "verification-outcome"
+    elif "hidden risk" in correlation_lower:
+        left_box_title = "Bypassed Mechanism"
+        right_box_title = "Required Hardening"
+        right_box_class = "suggested-fix"
+    elif "not applicable" in correlation_lower or status.lower() == "not_applicable":
+        left_box_title = "Lifecycle Scope"
+        right_box_title = "Applicability Scope"
+        right_box_class = "verification-outcome"
+    elif "confirmed" in correlation_lower or final_severity.lower() in ["critical", "high"]:
+        left_box_title = "Root Cause"
+        right_box_title = "Suggested Fix"
         right_box_class = "suggested-fix"
     else:
-        left_box_title = "Theoretical observation"
-        right_box_title = "Hardening guidance"
+        left_box_title = "Theoretical Observation"
+        right_box_title = "Hardening Guidance"
         right_box_class = "suggested-fix"
 
     return f"""
@@ -363,6 +417,7 @@ def finding_card(
             </strong>
             · {escape(correlation_rationale)}
         </div>
+        {controls_meta_html}
 
         <div class="finding-grid">
 
@@ -437,6 +492,10 @@ def render_dashboard(
     attacker_knowledge = deployment_context.get(
         "attacker_knowledge",
         "Not identified",
+    )
+    knowledge_desc = KNOWLEDGE_EXPLANATIONS.get(
+        str(attacker_knowledge).strip().lower(),
+        "",
     )
     attacker_access = deployment_context.get(
         "attacker_access",
@@ -783,6 +842,7 @@ def render_dashboard(
                     <div>
                         <strong>Knowledge:</strong>
                         {escape(attacker_knowledge)}
+                        {f'<div style="font-size: 0.78rem; color: #64748b; margin-top: 2px;">{escape(knowledge_desc)}</div>' if knowledge_desc else ''}
                     </div>
 
                     <div>

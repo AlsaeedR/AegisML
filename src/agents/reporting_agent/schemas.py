@@ -34,6 +34,21 @@ class ReportFinding(BaseModel):
 
     static_score_rationale: str = ""
 
+    status: Optional[str] = Field(
+        default="vulnerable",
+        description="Static assessment status: vulnerable, mitigated, or not_applicable."
+    )
+
+    mitigating_controls: List[str] = Field(
+        default_factory=list,
+        description="Defensive controls observed during static inspection."
+    )
+
+    control_verdict: Optional[str] = Field(
+        default=None,
+        description="Post-testing review of mitigating controls: 'verified_effective', 'bypassed', 'ineffective', or 'none'."
+    )
+
     # Agent 2 empirical/dynamic assessment
     test_status: str
 
@@ -117,6 +132,11 @@ class OverallRiskSummary(BaseModel):
     )
 
     not_applicable_findings: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    mitigated_findings: int = Field(
         default=0,
         ge=0,
     )

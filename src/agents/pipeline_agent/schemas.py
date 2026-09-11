@@ -84,6 +84,14 @@ class VulnerabilityFinding(BaseModel):
         "Model Training",
         "Inference"
     ] = Field(description="Pipeline lifecycle stage affected by this vulnerability.")
+    status: Literal["vulnerable", "mitigated", "not_applicable"] = Field(
+        default="vulnerable",
+        description="Assessment status: 'vulnerable' if unmitigated weaknesses exist, 'mitigated' if existing controls defend against the threat, or 'not_applicable' if the lifecycle stage is absent."
+    )
+    mitigating_controls: List[str] = Field(
+        default_factory=list,
+        description="Defensive mechanisms, sanitizers, or validation controls identified in target code."
+    )
     recommendations: List[str] = Field(
         default_factory=list,
         description="Actionable remediation recommendations (deferred to Agent 3 evidence synthesis)."

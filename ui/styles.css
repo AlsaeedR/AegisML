@@ -505,10 +505,11 @@ body {
 .root-cause,
 .suggested-fix {
     min-height: 116px;
-
+    height: auto;
     padding: 15px;
-
     border-radius: 7px;
+    box-sizing: border-box;
+    overflow: visible;
 }
 
 .root-cause {
@@ -539,6 +540,9 @@ body {
 .box-content {
     font-size: 13px;
     line-height: 1.65;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    white-space: normal;
 }
 
 .suggested-fix .box-content {
@@ -547,11 +551,14 @@ body {
 
 .verification-outcome {
     min-height: 116px;
+    height: auto;
     padding: 15px;
     border-radius: 7px;
     border: 1px solid #c7dcce;
     background: #edf5ef;
     color: #385a43;
+    box-sizing: border-box;
+    overflow: visible;
 }
 
 .verification-outcome .box-title {
@@ -563,6 +570,8 @@ body {
     font-size: 13px;
     line-height: 1.65;
     color: #33503b;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
 .tags {

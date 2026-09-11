@@ -117,8 +117,11 @@ def resolve_threat_surface(
     agent1_findings: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Maps Agent 1 static vulnerability categories and IDs into corresponding
+    Maps Agent 1 static threat evaluation findings and statuses into corresponding
     dynamic testing modules (V1_poisoning, V2_preprocessing, V3_validation, V4_adversarial).
+    Threats marked 'vulnerable' are targeted for exploit verification.
+    Threats marked 'mitigated' are included for defense-resilience verification.
+    Threats marked 'not_applicable' are skipped.
     """
     category_map = {
         "data poisoning": "V1_poisoning",
@@ -140,6 +143,11 @@ def resolve_threat_surface(
     for finding in agent1_findings:
         v_id = str(finding.get("vulnerability_id", "")).strip().lower()
         cat = str(finding.get("category", "")).strip().lower()
+        status = str(finding.get("status", "vulnerable")).strip().lower()
+
+        # Skip testing if the threat class is not applicable to the pipeline
+        if status == "not_applicable":
+            continue
 
         matched_test = id_map.get(v_id) or category_map.get(cat)
         if matched_test:
@@ -147,11 +155,13 @@ def resolve_threat_surface(
             mappings.append({
                 "vulnerability_id": finding.get("vulnerability_id"),
                 "category": finding.get("category"),
+                "status": status,
                 "matched_dynamic_test": matched_test,
+                "test_purpose": "exploit_verification" if status == "vulnerable" else "defense_bypass_check",
             })
 
-    # Default to all standard tests if no explicit mappings could be deduced
-    if not planned_tests:
+    # Default to all standard tests only if no findings were supplied
+    if not planned_tests and not agent1_findings:
         planned_tests = {"V1_poisoning", "V4_adversarial", "V2_preprocessing", "V3_validation"}
 
     # Maintain canonical ordering

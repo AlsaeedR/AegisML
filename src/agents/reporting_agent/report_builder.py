@@ -115,6 +115,7 @@ def _build_overall_risk(
             "hidden_risk_findings": 0,
             "unverified_findings": 0,
             "not_applicable_findings": 0,
+            "mitigated_findings": 0,
             "critical_findings": 0,
             "high_findings": 0,
             "medium_findings": 0,
@@ -220,6 +221,15 @@ def _build_overall_risk(
         )
     )
 
+    mitigated_findings = (
+        correlation_statuses.count(
+            "defended / mitigated"
+        )
+        + correlation_statuses.count(
+            "mitigated"
+        )
+    )
+
     return {
         "overall_risk_score": overall_score,
         "overall_severity": overall_severity,
@@ -243,6 +253,10 @@ def _build_overall_risk(
 
         "not_applicable_findings": (
             not_applicable_findings
+        ),
+
+        "mitigated_findings": (
+            mitigated_findings
         ),
 
         "critical_findings": (

@@ -124,6 +124,14 @@ def _run_in_docker(
     os.makedirs(input_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
+    # Sanitize agent_1_results to exclude non-serializable NetworkX DiGraph
+    clean_agent_1 = None
+    if agent_1_results:
+        clean_agent_1 = {
+            k: v for k, v in agent_1_results.items()
+            if k != "networkx_graph"
+        }
+
     strategy_payload = {
         "model_path": f"/workspace/data/{os.path.basename(model_path)}",
         "dataset_path": f"/workspace/data/{os.path.basename(dataset_path)}",
@@ -135,13 +143,15 @@ def _run_in_docker(
         "text_column": text_column,
         "label_column": label_column,
         "planned_tests": planned_tests,
-        "agent_1_results": agent_1_results,
+        "agent_1_results": clean_agent_1,
         **(strategy_config or {}),
     }
 
     input_json_path = os.path.join(input_dir, "strategy.json")
     with open(input_json_path, "w", encoding="utf-8") as f:
-        json.dump(strategy_payload, f, indent=2)
+        json.dump(strategy_payload, f, indent=2, default=str)
+
+    src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
     docker_cmd = [
         "docker", "run", "--rm",
@@ -153,6 +163,7 @@ def _run_in_docker(
         "-v", f"{data_dir}:/workspace/data:ro",
         "-v", f"{input_dir}:/workspace/input:ro",
         "-v", f"{output_dir}:/workspace/output:rw",
+        "-v", f"{src_dir}:/app/src:ro",
         image_name,
     ]
 
@@ -267,36 +278,29 @@ def _run_insecure_local(
         vectorizer_path = resolve_vectorizer_from_agent1(agent_1_results, base_dir=base_dir)
     vectorizer = load_vectorizer(vectorizer_path)
 
-    adv_cfg = (strategy_config or {}).get("adversarial_config", {})
+    test_state = {
+        "model": model,
+        "vectorizer": vectorizer,
+        "X_text": X_text,
+        "y_true": y_true,
+        "pipeline_path": pipeline_path if os.path.exists(pipeline_path) else None,
+        "adversarial_config": adv_cfg,
+    }
 
     if "V1_poisoning" in planned_tests:
-        p_res = run_poisoning_test(model, X_text, y_true, vectorizer=vectorizer)
+        p_res = run_poisoning_test(test_state)
         results["poisoning_evidence"] = p_res.get("poisoning_evidence", {})
 
     if "V4_adversarial" in planned_tests:
-        sample_size = adv_cfg.get("sample_size", 50)
-        max_rel_budget = adv_cfg.get("max_relative_perturbation_budget", 0.5)
-        a_res = run_adversarial_test(
-            model=model,
-            X_text=X_text,
-            y_true=y_true,
-            vectorizer=vectorizer,
-            n_samples=sample_size,
-            max_relative_perturbation_budget=max_rel_budget,
-        )
+        a_res = run_adversarial_test(test_state)
         results["adversarial_evidence"] = a_res.get("adversarial_evidence", {})
 
     if "V2_preprocessing" in planned_tests:
-        prep_state = {
-            "model": model,
-            "vectorizer": vectorizer,
-            "pipeline_path": pipeline_path if os.path.exists(pipeline_path) else None,
-        }
-        prep_res = run_preprocess_checks(prep_state)
+        prep_res = run_preprocess_checks(test_state)
         results["preprocessing_evidence"] = prep_res.get("preprocessing_evidence", {})
 
     if "V3_validation" in planned_tests:
-        val_res = run_validation_checks(model, X_text, y_true, vectorizer=vectorizer)
+        val_res = run_validation_checks(test_state)
         results["validation_evidence"] = val_res.get("validation_evidence", {})
 
     return results

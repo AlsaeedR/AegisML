@@ -72,13 +72,53 @@ flowchart TD
 
 ---
 
-## Zero-Trust Sandbox Isolation
+## Zero-Trust Sandbox Isolation & Docker Execution
 
-AegisML treats target pipelines and trained models as untrusted code:
-* **Host Protection**: The host system **never** calls `pickle.load()` on untrusted models or executes target code in-process. This eliminates Remote Code Execution (RCE) via `__reduce__` deserialization exploits.
-* **Air-Gapped Container**: Sandboxed tests run inside an isolated Docker container with `--network none`, strict memory caps (`--memory="4g"`), CPU limits (`--cpus="2.0"`), and read-only data volume mounts (`:ro`).
-* **Fail-Closed Policy**: If the Docker daemon is offline, dynamic execution halts safely and tests are marked as `Unverified (Sandbox Offline)`. The host is never compromised.
-* **Developer Override**: For offline development, explicitly setting `AEGISML_ALLOW_INSECURE_LOCAL_TESTING=true` enables in-process execution accompanied by security warnings.
+AegisML enforces a strict **Zero-Trust policy** for all dynamic penetration testing. Target pipeline scripts (`pipeline.py`) and serialized models (`model.pkl`) are treated as untrusted, hostile artifacts and are **never detonated in-process on the host system**.
+
+### How Docker Runs (Automated & Ephemeral)
+
+> [!IMPORTANT]
+> **No Manual Container Management Required**:
+> You do **not** need to keep a separate terminal open running Docker, and you do **not** need to run a manual `docker run` command during testing!
+> 
+> As long as **Docker Desktop** (or the Docker daemon) is running in the background on your system, AegisML handles container creation, test dispatch, result collection, and cleanup automatically.
+
+1. **On-Demand Spin-Up**: When Agent 2 reaches the `execute_sandbox` node, [`sandbox_runner.py`](file:///c:/Users/alsae/Documents/AegisML/src/agents/testing_agent/sandbox_runner.py) automatically invokes `docker run --rm ...` via a Python subprocess.
+2. **Air-Gapped Detonation**: The container executes empirical penetration tests inside an isolated environment:
+   * `--network none`: Strict network isolation prevents reverse shells, remote beaconing, or data exfiltration.
+   * `user: aegis (UID 1000)`: Tests execute under a non-root, unprivileged user.
+   * `--memory="4g" --cpus="2.0" --pids-limit=128`: Hard resource quotas prevent DoS and fork-bombs.
+   * `-v data:/workspace/data:ro -v src:/app/src:ro`: Target code, models, and test harnesses are mounted as **strictly read-only**.
+   * `180-second Watchdog`: Hard timeout forcibly terminates hanging or adversarial infinite loops.
+3. **Automated Cleanup**: The container writes `test_results.json` to an isolated output volume, terminates, and is automatically destroyed (`--rm`). Agent 2 then parses the results on the host for forensic diagnosis.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Host as Agent 2 (Host Orchestrator)
+    participant Docker as Docker Daemon (Background Service)
+    participant Container as Ephemeral Sandbox (aegisml-sandbox)
+
+    Host->>Docker: Checks if Docker is active (docker info)
+    alt Docker Running
+        Host->>Docker: Automatically spawns container (docker run --rm --network none ...)
+        Docker->>Container: Mounts data/ and src/ as read-only (:ro)
+        Container->>Container: Executes V1-V4 tests as non-root user (aegis)
+        Container->>Host: Writes test_results.json to isolated volume
+        Docker->>Container: Container terminates & deletes itself (--rm)
+        Host->>Host: LLM performs forensic root-cause analysis
+    else Docker Offline (Fail-Closed)
+        Host->>Host: Skips dynamic tests to prevent host RCE
+        Host->>Host: Flags tests as "Unverified (Sandbox Offline)"
+        Note over Host: Agent 3 continues with static threat audit
+    end
+```
+
+### Fail-Closed Policy & Developer Override
+
+* **Production / Default (Fail-Closed)**: If Docker is offline or uninstalled, AegisML **refuses** to execute untrusted models in-process. Dynamic tests are safely skipped to protect the host against Remote Code Execution (`__reduce__` deserialization attacks), and Agent 3 produces a static-only report with an explanatory security note.
+* **Offline Dev Override**: If you are developing locally without Docker and trust the evaluation artifacts, set `AEGISML_ALLOW_INSECURE_LOCAL_TESTING=true` in your `.env` to allow in-process execution with visible security warnings.
 
 ---
 
@@ -181,11 +221,29 @@ OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_MODEL_NAME=gpt-4o-mini
 ```
 
-### 5. Build the Sandbox Container (Optional, for Docker Execution)
-To run empirical tests in the isolated container:
-```bash
-docker build -t aegisml-sandbox:latest -f docker/sandbox.Dockerfile .
-```
+### 5. Setup the Docker Sandbox (One-Time Setup)
+
+To enable safe empirical testing, ensure Docker Desktop is running and build the sandbox image once:
+
+1. **Verify Docker Daemon is Running**:
+   ```bash
+   docker info
+   ```
+   If this prints system information, Docker is active and ready.
+
+2. **Build the Sandbox Image**:
+   From the repository root, build the hardened sandbox image:
+   ```bash
+   docker build -t aegisml-sandbox:latest -f docker/sandbox.Dockerfile .
+   ```
+
+3. **Verify the Built Image**:
+   ```bash
+   docker images aegisml-sandbox
+   ```
+
+> [!NOTE]
+> This build step is performed **only once**. Once the image `aegisml-sandbox:latest` exists, AegisML invokes it automatically on-demand during audits. You **never** need to run `docker run` manually.
 
 ---
 
@@ -243,6 +301,8 @@ The web dashboard provides an interactive interface for uploading pipeline asset
 
 #### Running Full Stack (API + Dashboard):
 
+You only need **two terminals** for the full application stack (Docker runs in the background as a system service):
+
 **Terminal 1 (Backend API):**
 ```bash
 uvicorn api:app --reload --port 8000
@@ -253,12 +313,16 @@ uvicorn api:app --reload --port 8000
 streamlit run app.py
 ```
 
+> [!TIP]
+> **Do I need a 3rd terminal for Docker?**
+> **No.** Docker Desktop runs silently as a background service. When you upload a pipeline in Streamlit and click "Run Full Security Audit", the FastAPI backend invokes the Docker container automatically via Python.
+
 The application will open in your browser at `http://localhost:8501`.
 
 #### Dashboard Features:
 * **Asset Upload Screen**: Upload pipeline `.py`, model `.pkl`, and dataset `.csv` with clear visual status indicators.
 * **Overview Tab**: Displays overall risk score (out of 10), severity badge, confirmed findings count, and LLM executive summary.
-* **Pipeline & Findings Tab**: Visualizes pipeline nodes, affected components, dynamic test metrics, and adaptive finding card framing (`Root cause` + `Suggested fix` for Confirmed Risks vs. `Theoretical concern` + `Verification outcome` for False Positives).
+* **Pipeline & Findings Tab**: Visualizes pipeline topology, affected components, dynamic test metrics, and adaptive finding card framing (`Root cause` + `Suggested fix` for Confirmed Risks vs. `Evaluated Threat Surface` + `Verified Defense` for Mitigated Findings).
 * **Governance Mapping Tab**: Maps empirical findings to NIST AI Risk Management framework controls and highlights False Positives vs. Hidden Risks.
 * **Full Report Tab**: Generates and downloads a multi-page security audit PDF document built with ReportLab.
 
@@ -272,7 +336,9 @@ $$\text{Theoretical Risk} = \frac{\text{Base Impact} \times \text{Static Likelih
 
 $$\text{Final Evidence-Informed Risk} = \frac{\text{Base Impact} \times \text{Evidence-Adjusted Likelihood}}{10}$$
 
-* **Confirmed Risk**: Agent 1 detected the threat and Agent 2 empirically confirmed vulnerability.
-* **False Positive (Mitigated)**: Agent 1 flagged High/Critical static risk, but Agent 2 proved the model was resilient (`not_vulnerable`). Likelihood is scaled down to residual baseline ($2.0/10$).
-* **Hidden Risk**: Agent 1 rated static risk Low, but Agent 2 successfully attacked the model (`vulnerable`). Likelihood is scaled up.
+* **Confirmed Risk**: Agent 1 identified an unmitigated vulnerability and Agent 2 empirically confirmed exploitation.
+* **Defended / Mitigated**: Agent 1 identified mitigating controls and Agent 2 dynamic testing confirmed the defenses successfully resisted attack (`not_vulnerable`). Likelihood is reduced ($\le 2.5/10$).
+* **False Positive**: Agent 1 flagged high theoretical risk, but Agent 2 proved the pipeline was resilient (`not_vulnerable`). Likelihood is scaled down to residual baseline ($2.0/10$).
+* **Hidden Risk**: Agent 1 rated static risk Low or assumed code defenses were sufficient, but Agent 2 successfully breached them (`vulnerable`). Likelihood is scaled up.
+* **Not Applicable**: The evaluated lifecycle stage is absent from the target code; zero risk is assigned.
 * **Unverified**: Empirical evidence was unavailable, incomplete, or skipped under the Zero-Trust policy. Static likelihood estimate is retained.

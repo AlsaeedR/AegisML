@@ -115,6 +115,18 @@ def node_correlate_findings(
                     "",
                 )
             ),
+            "status": (
+                static_finding.get(
+                    "status",
+                    "vulnerable",
+                )
+            ),
+            "mitigating_controls": (
+                static_finding.get(
+                    "mitigating_controls",
+                    [],
+                )
+            ),
             "recommendations": [],
 
             # Agent 2 dynamic evidence.
