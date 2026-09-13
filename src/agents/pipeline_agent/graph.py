@@ -1,12 +1,18 @@
-from typing import Dict, Any, Literal
+import json
+from typing import Any, Dict, List, Literal
 from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+from src.core.llm import get_llm, is_llm_available
 from .state import PipelineAgentState
 from .tools import (
     run_ast_extractor,
     run_networkx_builder,
     validate_threat_model_schema,
+    validate_threat_model_semantics,
     validate_vulnerabilities_schema,
+    validate_vulnerabilities_semantics,
+    make_graph_analysis_tools,
 )
 from .steps import (
     generate_threat_model_step,
@@ -37,19 +43,92 @@ def node_extract_pipeline(state: PipelineAgentState) -> Dict[str, Any]:
 
 def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
     """
-    Reasoning node: synthesizes code, AST findings, and graph topology
-    to produce the NIST AI 100-2e2025 deployment context and threat model.
+    Reasoning node — with active graph and code exploration tool-calling (ReAct pattern).
+
+    Phase 1:
+        The LLM is provided with domain-specific tools:
+        - query_trust_boundaries()
+        - query_components_by_type(component_type)
+        - trace_node_lineage(node_id)
+        - inspect_component_source(component_id)
+        The agent can autonomously call tools to inspect entry points, lineage, and component implementations.
+
+    Phase 2:
+        Calls generate_threat_model_step with the collected tool_context string
+        so the final threat model is grounded in verified code facts.
     """
     code = state["code"]
     pipeline_graph = state["pipeline_graph"]
+    networkx_graph = state.get("networkx_graph")
     topology = state.get("graph_topology", {})
     validation_errors = state.get("validation_errors")
+    tool_context: str = ""
+
+    if is_llm_available():
+        graph_tools = make_graph_analysis_tools(
+            pipeline_graph=pipeline_graph,
+            code=code,
+            networkx_graph=networkx_graph,
+        )
+        tool_map: Dict[str, Any] = {t.name: t for t in graph_tools}
+        llm_with_tools = get_llm(temperature=0.0).bind_tools(graph_tools)
+
+        error_note = (
+            f"\nPRIOR VALIDATION ERRORS TO FIX:\n{validation_errors}\n"
+            if validation_errors else ""
+        )
+
+        system_msg = SystemMessage(content=(
+            "You are the AegisML Pipeline & Threat Modeling Agent.\n"
+            "You have four active exploration tools to probe the pipeline before formulating the threat model:\n\n"
+            "- query_trust_boundaries(): returns entry-point nodes and ingestion nodes where untrusted data enters.\n"
+            "- query_components_by_type(component_type): filters nodes by functional role (e.g. 'vectoriz', 'classif', 'clean', 'train').\n"
+            "- trace_node_lineage(node_id): traces upstream sources and downstream sinks in the dataflow graph.\n"
+            "- inspect_component_source(component_id): extracts exact source code snippet and line numbers for a component.\n\n"
+            "Use these tools to ground your understanding of trust boundaries and protected assets. "
+            "When finished probing (or if no queries are needed), stop calling tools."
+        ))
+
+        human_msg = HumanMessage(content=(
+            f"Graph topology summary:\n{json.dumps(topology, indent=2)}\n"
+            f"{error_note}"
+            "Call exploration tools to investigate trust boundaries and components as needed. "
+            "When done, stop calling tools."
+        ))
+
+        messages: List[Any] = [system_msg, human_msg]
+
+        for _ in range(2):  # Focused tool rounds
+            response = llm_with_tools.invoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                break
+
+            tool_findings: List[str] = []
+            for tc in response.tool_calls:
+                t_name = tc["name"]
+                t_args = tc.get("args", {})
+                t_id = tc["id"]
+
+                if t_name in tool_map:
+                    result = tool_map[t_name].invoke(t_args)
+                    tool_findings.append(f"[{t_name}({t_args})]: {json.dumps(result, indent=2)}")
+                else:
+                    result = {"error": f"Unknown tool: {t_name}"}
+                    tool_findings.append(f"[{t_name}]: rejected — unknown tool.")
+
+                messages.append(ToolMessage(content=str(result), tool_call_id=t_id))
+
+            if tool_findings:
+                tool_context += "\n".join(tool_findings) + "\n"
 
     threat_model_raw = generate_threat_model_step(
         code=code,
         pipeline_graph=pipeline_graph,
         graph_topology=topology,
         validation_errors=validation_errors,
+        tool_context=tool_context or None,
     )
 
     return {
@@ -59,25 +138,38 @@ def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
 
 def node_validate_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
     """
-    Validation node: runs Pydantic verification on the generated threat model.
+    Validation node: runs syntactic Pydantic verification and semantic grounding
+    consistency checks on the generated threat model.
     If errors are detected, registers diagnostics for self-correction.
     """
     raw_threat_model = state.get("threat_model", {})
-    is_valid, errors, validated_model = validate_threat_model_schema(raw_threat_model)
+    pipeline_graph = state.get("pipeline_graph", {})
 
-    if is_valid and validated_model is not None:
+    # 1. Syntactic schema verification
+    is_valid, errors, validated_model = validate_threat_model_schema(raw_threat_model)
+    if not is_valid or validated_model is None:
+        current_retries = state.get("retry_count", 0) + 1
         return {
-            "threat_model": validated_model.model_dump(),
-            "validation_errors": None,
-            "retry_count": 0,
-            "status": "threat_model_validated",
+            "validation_errors": errors,
+            "retry_count": current_retries,
+            "status": "threat_model_validation_failed",
         }
 
-    current_retries = state.get("retry_count", 0) + 1
+    # 2. Semantic grounding verification
+    sem_valid, sem_errors = validate_threat_model_semantics(raw_threat_model, pipeline_graph)
+    if not sem_valid:
+        current_retries = state.get("retry_count", 0) + 1
+        return {
+            "validation_errors": sem_errors,
+            "retry_count": current_retries,
+            "status": "threat_model_validation_failed",
+        }
+
     return {
-        "validation_errors": errors,
-        "retry_count": current_retries,
-        "status": "threat_model_validation_failed",
+        "threat_model": validated_model.model_dump(),
+        "validation_errors": None,
+        "retry_count": 0,
+        "status": "threat_model_validated",
     }
 
 
@@ -100,23 +192,86 @@ def route_after_threat_model_validation(
 
 def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
     """
-    Reasoning node: analyzes the pipeline against the four MVP vulnerability
-    classes and produces concrete remediation recommendations.
+    Reasoning node: actively investigates the pipeline code and dataflow paths
+    using inspection tools to evaluate the four MVP vulnerability classes.
     """
     code = state["code"]
     pipeline_graph = state["pipeline_graph"]
+    networkx_graph = state.get("networkx_graph")
     threat_model = state["threat_model"]
     validation_errors = state.get("validation_errors")
+    tool_context: str = ""
+
+    if is_llm_available():
+        graph_tools = make_graph_analysis_tools(
+            pipeline_graph=pipeline_graph,
+            code=code,
+            networkx_graph=networkx_graph,
+        )
+        tool_map: Dict[str, Any] = {t.name: t for t in graph_tools}
+        llm_with_tools = get_llm(temperature=0.0).bind_tools(graph_tools)
+
+        error_note = (
+            f"\nPRIOR VALIDATION ERRORS TO FIX:\n{validation_errors}\n"
+            if validation_errors else ""
+        )
+
+        system_msg = SystemMessage(content=(
+            "You are the AegisML Pipeline Vulnerability Auditor.\n"
+            "Analyze the pipeline against the four MVP vulnerability classes:\n"
+            "1. V1 - Data Poisoning\n"
+            "2. V2 - Preprocessing Attack Surface\n"
+            "3. V3 - Data Validation Weaknesses\n"
+            "4. V4 - Adversarial Robustness\n\n"
+            "You have tools to actively verify whether code implements defensive controls:\n"
+            "- inspect_component_source(component_id): inspects exact lines of code to check for length caps, regex filters, or assertions.\n"
+            "- trace_node_lineage(node_id): traces whether unvalidated inputs reach downstream models or transforms.\n"
+            "- query_trust_boundaries(): checks data ingress points.\n"
+            "- query_components_by_type(component_type): locates specific modules.\n\n"
+            "Use these tools to inspect specific components before determining their vulnerability status."
+        ))
+
+        human_msg = HumanMessage(content=(
+            f"Threat Model Summary:\n{json.dumps(threat_model, indent=2)}\n"
+            f"{error_note}"
+            "Call inspection tools to verify defensive controls in the code. When finished, stop calling tools."
+        ))
+
+        messages: List[Any] = [system_msg, human_msg]
+
+        for _ in range(2):
+            response = llm_with_tools.invoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                break
+
+            tool_findings: List[str] = []
+            for tc in response.tool_calls:
+                t_name = tc["name"]
+                t_args = tc.get("args", {})
+                t_id = tc["id"]
+
+                if t_name in tool_map:
+                    result = tool_map[t_name].invoke(t_args)
+                    tool_findings.append(f"[{t_name}({t_args})]: {json.dumps(result, indent=2)}")
+                else:
+                    result = {"error": f"Unknown tool: {t_name}"}
+                    tool_findings.append(f"[{t_name}]: rejected — unknown tool.")
+
+                messages.append(ToolMessage(content=str(result), tool_call_id=t_id))
+
+            if tool_findings:
+                tool_context += "\n".join(tool_findings) + "\n"
 
     vulnerabilities_raw = generate_vulnerabilities_step(
         code=code,
         pipeline_graph=pipeline_graph,
         threat_model=threat_model,
         validation_errors=validation_errors,
+        tool_context=tool_context or None,
     )
 
-    # Agent 1 focuses purely on qualitative threat modeling and vulnerability identification.
-    # Mathematical risk scoring (both theoretical baseline and empirical) is centralized in Agent 3.
     return {
         "vulnerability_findings": vulnerabilities_raw,
     }
@@ -124,25 +279,37 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
 
 def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
     """
-    Validation node: evaluates the vulnerability report against Pydantic schema
-    and confirms coverage of all four MVP classes.
+    Validation node: evaluates the vulnerability report against syntactic Pydantic
+    schema and verifies semantic grounding against extracted AST nodes.
     """
     raw_findings = state.get("vulnerability_findings", {})
-    is_valid, errors, validated_report = validate_vulnerabilities_schema(raw_findings)
+    pipeline_graph = state.get("pipeline_graph", {})
 
-    if is_valid and validated_report is not None:
+    # 1. Syntactic schema verification
+    is_valid, errors, validated_report = validate_vulnerabilities_schema(raw_findings)
+    if not is_valid or validated_report is None:
+        current_retries = state.get("retry_count", 0) + 1
         return {
-            "vulnerability_findings": validated_report.model_dump(),
-            "validation_errors": None,
-            "retry_count": 0,
-            "status": "vulnerabilities_validated",
+            "validation_errors": errors,
+            "retry_count": current_retries,
+            "status": "vulnerability_validation_failed",
         }
 
-    current_retries = state.get("retry_count", 0) + 1
+    # 2. Semantic grounding verification
+    sem_valid, sem_errors = validate_vulnerabilities_semantics(validated_report, pipeline_graph)
+    if not sem_valid:
+        current_retries = state.get("retry_count", 0) + 1
+        return {
+            "validation_errors": sem_errors,
+            "retry_count": current_retries,
+            "status": "vulnerability_validation_failed",
+        }
+
     return {
-        "validation_errors": errors,
-        "retry_count": current_retries,
-        "status": "vulnerability_validation_failed",
+        "vulnerability_findings": validated_report.model_dump(),
+        "validation_errors": None,
+        "retry_count": 0,
+        "status": "vulnerabilities_validated",
     }
 
 
@@ -150,8 +317,8 @@ def route_after_vulnerability_validation(
     state: PipelineAgentState,
 ) -> Literal["reason_vulnerabilities", "finalize_agent_results"]:
     """
-    Conditional router: loops back to refine vulnerabilities if schema validation fails,
-    or transitions to finalization once valid.
+    Conditional router: loops back to refine vulnerabilities if schema or semantic
+    validation fails, or transitions to finalization once valid.
     """
     has_errors = state.get("validation_errors") is not None
     retry_count = state.get("retry_count", 0)

@@ -117,6 +117,10 @@ class AttackStrategyPlan(BaseModel):
         default="",
         description="High-level cognitive justification synthesizing Agent 1 threat model and data profile."
     )
+    strategy_provenance: str = Field(
+        default="autonomous_cognitive",
+        description="Origin of strategy formulation: 'autonomous_cognitive' or 'static_baseline'."
+    )
 
 
 class ForensicFinding(BaseModel):

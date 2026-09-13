@@ -4,6 +4,7 @@ import json
 import time
 from typing import Any, Dict, List
 
+from .constants import TEST_ORDER
 from .loader import (
     load_trained_model,
     load_dataset,
@@ -48,7 +49,8 @@ def execute_worker():
     text_column = strategy.get("text_column", "Comment")
     label_column = strategy.get("label_column", "Topic")
     agent_1_results = strategy.get("agent_1_results")
-    planned_tests = strategy.get("planned_tests", ["V1_poisoning", "V4_adversarial", "V2_preprocessing", "V3_validation"])
+    planned_tests = strategy.get("planned_tests", list(TEST_ORDER))
+
     
     # Attack configs
     adv_config = strategy.get("adversarial_config", {})

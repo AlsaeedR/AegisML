@@ -2,33 +2,24 @@ import os
 from typing import Any, Dict, List, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.core.llm import get_llm, is_llm_available
 from .state import TestingAgentState
 from .schemas import (
     AttackStrategyPlan,
     AdversarialAttackConfig,
-    PoisoningAttackConfig,
-    PreprocessingTestConfig,
-    ValidationTestConfig,
     ForensicAnalysisReport,
     ForensicFinding,
 )
 from .tools import (
     inspect_dataset_profile,
     calculate_perturbation_budget,
-    resolve_threat_surface,
-    COGNITIVE_PLANNING_TOOLS,
+    make_cognitive_planning_tools,
+    make_forensic_diagnostic_tools,
 )
 from .sandbox_runner import dispatch_sandbox
-
-
-TEST_ORDER = [
-    "V1_poisoning",
-    "V4_adversarial",
-    "V2_preprocessing",
-    "V3_validation",
-]
+from .constants import TEST_ORDER, MVP_VULNERABILITIES
 
 
 def node_prepare_metadata(state: TestingAgentState) -> Dict[str, Any]:
@@ -57,64 +48,142 @@ def node_prepare_metadata(state: TestingAgentState) -> Dict[str, Any]:
 
 def node_reason_strategy(state: TestingAgentState) -> Dict[str, Any]:
     """
-    Cognitive Pre-Attack Reasoning Node.
-    Uses LLM bound to LangChain tools to inspect threat surface and formulate
-    mathematically calibrated attack parameters (Bounded Agency Pattern).
+    Cognitive Pre-Attack Reasoning Node — Autonomous LLM Tool-Calling (ReAct Pattern).
+
+    The strategist is equipped with active cognitive planning tools:
+    - inspect_dataset_profile: inspects dataset shapes, class distributions, and text stats.
+    - calculate_perturbation_budget: computes mathematical evasion bounds and iteration budgets.
+    - resolve_threat_surface: maps Agent 1's qualitative findings to applicable dynamic tests.
+    - inspect_agent1_hypotheses: queries specific vulnerability claims and components from Agent 1.
+
+    Runs an autonomous ReAct loop before producing a typed AttackStrategyPlan.
+    Includes self-repair reflection on schema extraction errors and strict mode enforcement.
     """
     log = list(state.get("execution_plan_log") or [])
     agent_1 = state.get("agent_1_results") or {}
     dataset_profile = state.get("dataset_profile") or {}
+    dataset_path = state.get("dataset_path", "data/dataset.csv")
+    text_column = state.get("text_column", "text")
+    label_column = state.get("label_column", "label")
     explicit_targets = state.get("test_targets")
 
-    # Safe fallback plan if LLM is unavailable or fails
-    fallback_plan = _get_default_strategy_plan(explicit_targets, agent_1, dataset_profile)
+    strict_mode = os.getenv("AEGISML_STRICT_AGENT", "false").lower() in ("true", "1")
+
+    def get_fallback(reason: str) -> AttackStrategyPlan:
+        if strict_mode:
+            raise RuntimeError(f"AEGISML_STRICT_AGENT enforcement failure: {reason}")
+        plan = _get_default_strategy_plan(explicit_targets, agent_1, dataset_profile)
+        plan.strategy_provenance = "static_baseline"
+        plan.planning_rationale = f"Static baseline applied: {reason}"
+        return plan
 
     if not is_llm_available():
-        log.append("LLM credentials unavailable. Applied deterministic attack strategy plan.")
+        fallback = get_fallback("LLM provider credentials unavailable.")
+        log.append("LLM credentials unavailable. Applied deterministic attack strategy plan (provenance: static_baseline).")
         return {
-            "attack_strategy_plan": fallback_plan.model_dump(),
-            "planned_tests": fallback_plan.selected_tests,
+            "attack_strategy_plan": fallback.model_dump(),
+            "planned_tests": fallback.selected_tests,
             "execution_plan_log": log,
         }
 
     try:
-        llm = get_llm(temperature=0.0)
-        structured_llm = llm.with_structured_output(AttackStrategyPlan)
-
         threat_model = agent_1.get("threat_model", {})
         vuln_findings = agent_1.get("vulnerability_findings", {}).get("vulnerabilities", [])
 
-        system_prompt = (
+        system_msg = SystemMessage(content=(
             "You are the AegisML Lead Penetration Testing Strategist (Agent 2).\n"
-            "Your objective is to inspect the static threat model from Agent 1 and the target dataset "
-            "profile to formulate a mathematically grounded, highly targeted dynamic testing strategy.\n"
-            "Calibrate perturbation budgets according to feature representation and dimensionality.\n"
-            "Target tests available: V1_poisoning, V4_adversarial, V2_preprocessing, V3_validation."
-        )
+            "You have cognitive planning tools to formulate an empirical testing campaign:\n\n"
+            "- bound_inspect_dataset_profile: queries dataset row counts, class balances, and text statistics.\n"
+            "- calculate_perturbation_budget: computes mathematically sound epsilon bounds, max iterations, "
+            "and sample sizes for HopSkipJump evasion attacks.\n"
+            "- bound_resolve_threat_surface: maps Agent 1's static findings to relevant dynamic tests.\n"
+            "- bound_inspect_agent1_hypotheses: inspects specific vulnerability claims and affected components.\n\n"
+            "Calibrate all attack parameters specifically for the target pipeline's feature representation. "
+            "Call tools in whatever sequence needed to gather quantitative evidence. "
+            "When you have enough information, stop calling tools."
+        ))
 
-        user_prompt = (
-            f"Dataset Profile:\n{dataset_profile}\n\n"
+        human_msg = HumanMessage(content=(
+            f"Dataset path: {dataset_path}\n"
+            f"Text column: {text_column}\n"
+            f"Label column: {label_column}\n\n"
+            f"Initial dataset profile:\n{dataset_profile}\n\n"
             f"Agent 1 Threat Model:\n{threat_model}\n\n"
-            f"Agent 1 Static Findings:\n{vuln_findings}\n\n"
-            f"Explicit Targets Override: {explicit_targets}\n\n"
-            "Formulate the optimal attack strategy plan."
+            f"Agent 1 Vulnerability Findings Count: {len(vuln_findings)}\n\n"
+            f"Explicit test targets override (if any): {explicit_targets}\n\n"
+            "Use your planning tools to gather quantitative calibration data, then synthesize the strategy plan."
+        ))
+
+        planning_tools = make_cognitive_planning_tools(
+            agent_1_results=agent_1,
+            dataset_path=dataset_path,
+            text_column=text_column,
+            label_column=label_column,
         )
+        tool_map: Dict[str, Any] = {t.name: t for t in planning_tools}
+        llm_with_tools = get_llm(temperature=0.0).bind_tools(planning_tools)
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", user_prompt),
-        ])
+        messages: List[Any] = [system_msg, human_msg]
+        MAX_TOOL_ROUNDS = 3
 
-        chain = prompt | structured_llm
-        strategy_plan: AttackStrategyPlan = chain.invoke({})
+        for round_idx in range(MAX_TOOL_ROUNDS):
+            response = llm_with_tools.invoke(messages)
+            messages.append(response)
 
-        # Ensure canonical ordering of selected tests
+            if not response.tool_calls:
+                log.append(
+                    f"Cognitive strategist completed tool investigation after {round_idx} round(s). "
+                    "Synthesizing AttackStrategyPlan."
+                )
+                break
+
+            for tool_call in response.tool_calls:
+                tool_name = tool_call["name"]
+                tool_args = tool_call["args"]
+                tool_id = tool_call["id"]
+
+                if tool_name in tool_map:
+                    tool_result = tool_map[tool_name].invoke(tool_args)
+                    log.append(f"Cognitive strategist called tool '{tool_name}' with args: {tool_args}.")
+                else:
+                    tool_result = {"error": f"Unknown tool requested: {tool_name}"}
+                    log.append(f"Cognitive strategist attempted unknown tool '{tool_name}' — rejected.")
+
+                messages.append(ToolMessage(
+                    content=str(tool_result),
+                    tool_call_id=tool_id,
+                ))
+
+        # ── Phase 2: Structured Strategy Plan Extraction with Self-Repair ─────
+        messages.append(HumanMessage(content=(
+            "You have collected all necessary quantitative data. "
+            "Produce the final AttackStrategyPlan as a structured object.\n\n"
+            "Constraints:\n"
+            "- selected_tests must only contain valid IDs from: "
+            "[V1_poisoning, V4_adversarial, V2_preprocessing, V3_validation].\n"
+            "- Calibrate adversarial_config with your computed perturbation budget and max_iter.\n"
+            "- Calibrate poisoning_config poison_fractions according to class balance.\n"
+            "- Include a thorough planning_rationale citing the tool observations that informed your decisions."
+        )))
+
+        structured_llm = get_llm(temperature=0.0).with_structured_output(AttackStrategyPlan)
+        try:
+            strategy_plan: AttackStrategyPlan = structured_llm.invoke(messages)
+        except Exception as schema_err:
+            # Self-repair attempt: feed error back into context
+            log.append(f"Strategy extraction encountered error ({str(schema_err)}). Attempting self-repair reflection.")
+            messages.append(HumanMessage(content=(
+                f"Your previous output failed schema validation with error: {str(schema_err)}. "
+                "Please regenerate the AttackStrategyPlan strictly matching schema types."
+            )))
+            strategy_plan = structured_llm.invoke(messages)
+
+        strategy_plan.strategy_provenance = "autonomous_cognitive"
+
         ordered_tests = [t for t in TEST_ORDER if t in strategy_plan.selected_tests]
-        if not ordered_tests:
-            ordered_tests = list(TEST_ORDER)
-        strategy_plan.selected_tests = ordered_tests
+        strategy_plan.selected_tests = ordered_tests or list(TEST_ORDER)
 
-        log.append(f"Cognitive strategy formulated. Planned tests: {strategy_plan.selected_tests}")
+        log.append(f"Cognitive strategy formulated (provenance: {strategy_plan.strategy_provenance}). Planned tests: {strategy_plan.selected_tests}")
         log.append(f"Strategy rationale: {strategy_plan.planning_rationale}")
 
         return {
@@ -124,10 +193,11 @@ def node_reason_strategy(state: TestingAgentState) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        log.append(f"LLM strategy formulation encountered error ({str(e)}). Used deterministic fallback.")
+        fallback = get_fallback(f"Reasoning loop encountered exception: {str(e)}")
+        log.append(f"LLM strategy formulation error ({str(e)}). Applied baseline strategy (provenance: {fallback.strategy_provenance}).")
         return {
-            "attack_strategy_plan": fallback_plan.model_dump(),
-            "planned_tests": fallback_plan.selected_tests,
+            "attack_strategy_plan": fallback.model_dump(),
+            "planned_tests": fallback.selected_tests,
             "execution_plan_log": log,
         }
 
@@ -173,12 +243,18 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
 
 def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
     """
-    Cognitive Post-Attack Forensic Diagnosis Node.
-    Synthesizes empirical attack telemetry, identifies mathematical root causes,
-    and cross-verifies against Agent 1's qualitative hypotheses.
+    Cognitive Post-Attack Forensic Diagnosis Node — Tool-Empowered Empirical Investigation.
+
+    The forensic diagnostician uses active analytical tools:
+    - bound_query_attack_telemetry: extracts granular container telemetry, attack iterations, and degradation curves.
+    - bound_evaluate_hypothesis_correlation: compares Agent 1's qualitative claims against empirical measurements.
+
+    Produces a rigorous ForensicAnalysisReport synthesizing mathematical root causes and
+    verifying or refuting upstream static hypotheses.
     """
     log = list(state.get("execution_plan_log") or [])
     sandbox_status = state.get("sandbox_status", "")
+    agent_1 = state.get("agent_1_results") or {}
 
     if sandbox_status == "skipped_zero_trust":
         log.append("Dynamic tests skipped under Zero-Trust policy. Forensic analysis deferred.")
@@ -194,7 +270,6 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
             "execution_plan_log": log,
         }
 
-    # Collect available empirical evidence
     evidence_bundle = {
         "V1_poisoning": state.get("poisoning_evidence"),
         "V4_adversarial": state.get("adversarial_evidence"),
@@ -210,29 +285,68 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
         }
 
     try:
-        llm = get_llm(temperature=0.1)
-        structured_llm = llm.with_structured_output(ForensicAnalysisReport)
+        # Diagnostic tools for post-attack investigation
+        diag_tools = make_forensic_diagnostic_tools(
+            evidence_bundle=evidence_bundle,
+            agent_1_results=agent_1,
+        )
+        tool_map = {t.name: t for t in diag_tools}
+        llm_with_tools = get_llm(temperature=0.0).bind_tools(diag_tools)
 
         system_prompt = (
             "You are the AegisML Lead ML Forensic Security Diagnostician (Agent 2).\n"
-            "Analyze the empirical DAST test results and diagnose mathematical root causes.\n"
-            "Confirm or refute whether the empirical evidence validates Agent 1's static hypotheses."
+            "You have diagnostic tools to investigate empirical container telemetry:\n"
+            "- bound_query_attack_telemetry(test_id): retrieves detailed measurements and degradation curves.\n"
+            "- bound_evaluate_hypothesis_correlation(vulnerability_id): mathematically correlates Agent 1's claim "
+            "with empirical telemetry to determine 'Confirmed Risk', 'False Positive (Mitigated)', 'Hidden Risk', or 'Unverified'.\n\n"
+            "Use these tools to investigate anomalous telemetry, then produce your final ForensicAnalysisReport."
         )
 
         user_prompt = (
-            f"Empirical Test Telemetry:\n{evidence_bundle}\n\n"
-            f"Agent 1 Static Findings:\n{state.get('agent_1_results', {}).get('vulnerability_findings')}\n\n"
-            "Provide forensic findings and an overall forensic synthesis."
+            f"Empirical Test Telemetry Summary:\n{evidence_bundle}\n\n"
+            f"Agent 1 Static Findings:\n{agent_1.get('vulnerability_findings')}\n\n"
+            "Investigate the empirical telemetry using your diagnostic tools, then formulate the forensic report."
         )
 
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", user_prompt),
-        ])
+        messages: List[Any] = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
 
-        chain = prompt | structured_llm
-        report: ForensicAnalysisReport = chain.invoke({})
-        log.append("Cognitive forensic diagnosis completed successfully.")
+        # ReAct investigative rounds (max 2)
+        for _ in range(2):
+            response = llm_with_tools.invoke(messages)
+            messages.append(response)
+
+            if not response.tool_calls:
+                break
+
+            for tc in response.tool_calls:
+                t_name = tc["name"]
+                t_args = tc.get("args", {})
+                t_id = tc["id"]
+
+                if t_name in tool_map:
+                    t_result = tool_map[t_name].invoke(t_args)
+                    log.append(f"Forensic diagnostician queried '{t_name}' with args {t_args}.")
+                else:
+                    t_result = {"error": f"Unknown tool: {t_name}"}
+
+                messages.append(ToolMessage(
+                    content=str(t_result),
+                    tool_call_id=t_id,
+                ))
+
+        # Synthesis of ForensicAnalysisReport
+        messages.append(HumanMessage(content=(
+            "Based on your empirical investigation and tool findings, produce the final "
+            "ForensicAnalysisReport as a structured object. Document mathematical root causes "
+            "and explicit hypothesis confirmations for each tested vulnerability."
+        )))
+
+        structured_llm = get_llm(temperature=0.1).with_structured_output(ForensicAnalysisReport)
+        report: ForensicAnalysisReport = structured_llm.invoke(messages)
+        log.append("Cognitive forensic diagnosis completed successfully via tool-empowered investigation.")
 
         return {
             "forensic_analysis": report.model_dump(),
@@ -285,15 +399,9 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
             asr = adv_ev.get("evidence", {}).get("attack_success_rate_within_budget")
             verifications.append(_verification_from_status("V4", "Adversarial Robustness", adv_ev, {"attack_success_rate": asr}))
 
-    # Fill in any missing default tests as not_tested
+    # Fill in any missing default tests as not_tested.
     present_ids = {r.get("vulnerability_id") for r in results}
-    default_tests = [
-        ("V1", "Data Poisoning"),
-        ("V2", "Preprocessing Attack Surface"),
-        ("V3", "Data Validation Weaknesses"),
-        ("V4", "Adversarial Robustness"),
-    ]
-    for vid, vname in default_tests:
+    for vid, vname in MVP_VULNERABILITIES:
         if vid not in present_ids:
             results.append({
                 "vulnerability_id": vid,
@@ -303,7 +411,8 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
                 "evidence": {"reason": "Test was not scheduled in strategy."},
             })
 
-    result_order = {"V1": 1, "V4": 2, "V2": 3, "V3": 4}
+    # Sort by execution priority derived from TEST_ORDER (V1->V4->V2->V3).
+    result_order = {t.split("_")[0]: i for i, t in enumerate(TEST_ORDER)}
     results.sort(key=lambda r: result_order.get(r.get("vulnerability_id", ""), 99))
 
     return {
@@ -372,9 +481,9 @@ def _get_default_strategy_plan(
         rationale=budget_info.get("rationale", "Standard budget for text classification."),
     )
 
-    planned = ["V1_poisoning", "V4_adversarial", "V2_preprocessing", "V3_validation"]
+    planned = list(TEST_ORDER)
     if explicit_targets:
-        planned = [t for t in planned if any(x.lower() in t.lower() for x in explicit_targets)]
+        planned = [t for t in TEST_ORDER if any(x.lower() in t.lower() for x in explicit_targets)]
         if not planned:
             planned = list(TEST_ORDER)
 
@@ -382,6 +491,7 @@ def _get_default_strategy_plan(
         selected_tests=planned,
         adversarial_config=adv_cfg,
         planning_rationale="Deterministic rule-based baseline strategy.",
+        strategy_provenance="static_baseline",
     )
 
 
