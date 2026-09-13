@@ -22,7 +22,12 @@ from reportlab.platypus import (
     Preformatted,
 )
 
-from ui.dashboard import render_dashboard
+from ui.dashboard import (
+    render_dashboard,
+    render_interactive_pipeline_graph,
+    render_attack_strategy_gate,
+    render_report_signoff_gate,
+)
 
 
 API_URL = "http://127.0.0.1:8000"
@@ -854,6 +859,33 @@ st.markdown(
         visibility: hidden;
     }
 
+    /* -----------------------------------------------------
+       Streamlit top-right controls spacing
+       ----------------------------------------------------- */
+
+    /* Keep Stop / Deploy visible, but give the toolbar
+       more breathing room so the controls do not look
+       crowded together. */
+    div[data-testid="stToolbar"] {
+        gap: 1.25rem !important;
+        padding-right: 0.75rem !important;
+    }
+
+    div[data-testid="stToolbar"] > div {
+        gap: 1rem !important;
+    }
+
+    /* Add separation between Streamlit's native toolbar
+       and AegisML's status badge below it. */
+    .upload-hero {
+        padding-top: 1.25rem;
+    }
+
+    .upload-status-badge {
+        margin-top: 0.65rem;
+        margin-right: 0.15rem;
+    }
+
     div[data-testid="stFileUploader"] {
         background: transparent;
     }
@@ -921,6 +953,62 @@ st.html(
 
 if "audit_result" not in st.session_state:
     st.session_state.audit_result = None
+if "audit_plan" not in st.session_state:
+    st.session_state.audit_plan = None
+if "audit_id" not in st.session_state:
+    st.session_state.audit_id = None
+if "report_signed_off" not in st.session_state:
+    st.session_state.report_signed_off = False
+
+
+# =========================================================
+# GATE 1 - HUMAN ATTACK STRATEGY APPROVAL
+# =========================================================
+
+if st.session_state.audit_result is None and st.session_state.audit_plan is not None:
+    st.html(
+        """
+        <div class="upload-hero">
+            <div class="upload-hero-left">
+                <div class="upload-brand-row">
+                    <div class="upload-logo">A</div>
+                    <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                </div>
+                <p class="upload-hero-subtitle">
+                    Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                </p>
+            </div>
+            <div class="upload-status-badge">GATE 1 &middot; APPROVAL REQUIRED</div>
+        </div>
+        """
+    )
+
+    render_interactive_pipeline_graph(st.session_state.audit_plan)
+
+    if render_attack_strategy_gate(st.session_state.audit_plan):
+        try:
+            with st.spinner("Running approved dynamic tests and evidence correlation..."):
+                response = requests.post(
+                    f"{API_URL}/audit/execute",
+                    data={"audit_id": st.session_state.audit_id},
+                    timeout=600,
+                )
+
+            if response.status_code != 200:
+                try:
+                    detail = response.json().get("detail", "Audit execution failed.")
+                except Exception:
+                    detail = response.text
+                st.error(detail)
+            else:
+                st.session_state.audit_result = response.json()
+                st.session_state.audit_plan = None
+                st.session_state.report_signed_off = False
+                st.rerun()
+        except requests.exceptions.RequestException as exc:
+            st.error(f"API error: {exc}")
+
+    st.stop()
 
 
 # =========================================================
@@ -1118,7 +1206,7 @@ if st.session_state.audit_result is None:
                 ):
 
                     response = requests.post(
-                        f"{API_URL}/audit",
+                        f"{API_URL}/audit/plan",
                         files=files,
                         data=data,
                         timeout=600,
@@ -1141,10 +1229,10 @@ if st.session_state.audit_result is None:
 
                 else:
 
-                    st.session_state.audit_result = (
-                        response.json()
-                    )
-
+                    plan_payload = response.json()
+                    st.session_state.audit_plan = plan_payload
+                    st.session_state.audit_id = plan_payload.get("audit_id")
+                    st.session_state.audit_result = None
                     st.rerun()
 
             except requests.exceptions.ConnectionError:
@@ -1234,14 +1322,17 @@ else:
         st.session_state.active_report_section = "Pipeline & findings"
 
     tab_names = [
-        "Overview",
         "Pipeline & findings",
-        "Governance mapping",
         "Full report",
     ]
 
+    # Reset old saved tab values from previous versions of the UI.
+    if st.session_state.active_report_section not in tab_names:
+        st.session_state.active_report_section = "Pipeline & findings"
+
+    # Two equal-width tabs that fill the available page width.
     tab_cols = st.columns(
-        [1.0, 1.55, 1.55, 1.0, 5.0],
+        [1, 1],
         gap="small",
     )
 
@@ -1255,43 +1346,62 @@ else:
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor) {
             gap: 0 !important;
             border-bottom: 1px solid #dedfd9;
+            width: 100% !important;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
+        > div {
+            flex: 1 1 50% !important;
+            width: 50% !important;
+            max-width: 50% !important;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
+        .stButton {
+            width: 100% !important;
         }
 
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
         .stButton > button {
+            width: 100% !important;
             border: 0 !important;
             border-radius: 0 !important;
             background: transparent !important;
             box-shadow: none !important;
             color: #777b73 !important;
-            min-height: 48px !important;
+            min-height: 54px !important;
             font-weight: 500 !important;
+            font-size: 1rem !important;
             border-bottom: 2px solid transparent !important;
         }
 
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
         .stButton > button:hover {
             color: #30342c !important;
+            background: rgba(79, 128, 96, 0.04) !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    with tab_cols[4]:
-        st.markdown(
-            '<span class="aegis-tabs-anchor"></span>',
-            unsafe_allow_html=True,
+    for index, (tab_col, tab_name) in enumerate(
+        zip(
+            tab_cols,
+            tab_names,
         )
-
-    for tab_col, tab_name in zip(
-        tab_cols[:4],
-        tab_names,
     ):
         with tab_col:
+            if index == 0:
+                st.markdown(
+                    '<span class="aegis-tabs-anchor"></span>',
+                    unsafe_allow_html=True,
+                )
+
             if st.button(
                 tab_name,
                 key=f"report_tab_{tab_name}",
+                use_container_width=True,
             ):
                 st.session_state.active_report_section = tab_name
                 st.rerun()
@@ -1305,89 +1415,19 @@ else:
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
         > div:nth-child({active_index}) .stButton > button {{
             color: #30342c !important;
-            border-bottom: 2px solid #4f8060 !important;
+            border-bottom: 3px solid #4f8060 !important;
+            font-weight: 650 !important;
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    if active_section == "Overview":
+    if active_section == "Pipeline & findings":
 
-        overall_score = float(
-            overall.get(
-                "overall_risk_score",
-                0.0,
-            )
-        )
-
-        overall_severity = str(
-            overall.get(
-                "overall_severity",
-                "Low",
-            )
-        )
-
-        confirmed = int(
-            overall.get(
-                "confirmed_findings",
-                0,
-            )
-        )
-
-        false_positives = int(
-            overall.get(
-                "false_positive_findings",
-                0,
-            )
-        )
-
-        hidden_risks = int(
-            overall.get(
-                "hidden_risk_findings",
-                0,
-            )
-        )
-
-        summary = clean_executive_summary(
-            report.get(
-                "executive_summary",
-                "",
-            )
-        )
-
-        st.markdown("## Overview")
-
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric(
-            "Final risk",
-            f"{overall_score:.1f}/10",
-        )
-
-        c2.metric(
-            "Severity",
-            overall_severity,
-        )
-
-        c3.metric(
-            "Confirmed findings",
-            confirmed,
-        )
-
-        c4.metric(
-            "Total findings",
-            len(findings),
-        )
-
-        st.markdown(summary)
-
-        st.caption(
-            f"False positives: {false_positives} · "
-            f"Hidden risks: {hidden_risks}"
-        )
-
-    elif active_section == "Pipeline & findings":
+        st.markdown("## Interactive pipeline graph")
+        render_interactive_pipeline_graph(result)
+        st.divider()
 
         # Only render the dashboard content here.
         # The header/summary was already rendered above the tabs.
@@ -1398,63 +1438,35 @@ else:
             )
         )
 
-    elif active_section == "Governance mapping":
+        # Re-scan is a global audit action, so keep it available
+        # from the Pipeline & findings tab as well.
+        st.divider()
 
-        st.markdown("## Governance mapping")
-
-        st.markdown(
-            "AegisML uses a **NIST-aligned risk assessment methodology**. "
-            "Agent 1 provides theoretical/static threat context, "
-            "Agent 2 performs empirical security testing, and "
-            "Agent 3 correlates both sources to produce the final "
-            "evidence-informed risk assessment."
+        pipeline_footer_info, pipeline_spacer, pipeline_rescan_col = (
+            st.columns(
+                [6, 1, 1.2]
+            )
         )
 
-        st.caption(
-            "This view summarizes assessment evidence and correlation "
-            "results; it does not claim certification or introduce "
-            "controls that were not assessed."
-        )
-
-        governance_rows = []
-
-        for finding in findings:
-            governance_rows.append(
-                {
-                    "ID": finding.get(
-                        "vulnerability_id",
-                        "Unknown",
-                    ),
-                    "Category": finding.get(
-                        "category",
-                        "Security finding",
-                    ),
-                    "Dynamic status": finding.get(
-                        "test_status",
-                        "not_tested",
-                    ),
-                    "Correlation": finding.get(
-                        "correlation_status",
-                        "Unverified",
-                    ),
-                    "Final severity": finding.get(
-                        "final_severity",
-                        "Low",
-                    ),
-                }
+        with pipeline_footer_info:
+            st.caption(
+                f"Scanned 3 files · "
+                f"{len(findings)} findings · "
+                "AegisML security assessment"
             )
 
-        if governance_rows:
-            st.dataframe(
-                governance_rows,
+        with pipeline_rescan_col:
+            if st.button(
+                "Re-scan",
                 use_container_width=True,
-                hide_index=True,
-            )
-
-        st.markdown(
-            "**Assessment flow:** "
-            "Agent 1 → Agent 2 → Agent 3 → Final risk assessment"
-        )
+                key="pipeline_rescan",
+            ):
+                st.session_state.audit_result = None
+                st.session_state.audit_plan = None
+                st.session_state.audit_id = None
+                st.session_state.report_signed_off = False
+                st.session_state.active_report_section = "Pipeline & findings"
+                st.rerun()
 
     else:
 
@@ -1466,50 +1478,55 @@ else:
             "evidence, correlation results, and recommendations."
         )
 
+        render_report_signoff_gate(result)
 
-    # -----------------------------------------------------
-    # Bottom actions
-    # -----------------------------------------------------
+        # -------------------------------------------------
+        # Full-report actions
+        # -------------------------------------------------
 
-    st.divider()
+        st.divider()
 
-    footer_info, spacer, rescan_col, download_col = (
-        st.columns(
-            [5, 1, 1.1, 1.7]
-        )
-    )
-
-    with footer_info:
-
-        st.caption(
-            f"Scanned 3 files · "
-            f"{len(findings)} findings · "
-            "AegisML security assessment"
+        footer_info, spacer, rescan_col, download_col = (
+            st.columns(
+                [5, 1, 1.1, 1.7]
+            )
         )
 
-    with rescan_col:
+        with footer_info:
+            st.caption(
+                f"Scanned 3 files · "
+                f"{len(findings)} findings · "
+                "AegisML security assessment"
+            )
 
-        if st.button(
-            "Re-scan",
-            use_container_width=True,
-        ):
+        with rescan_col:
+            if st.button(
+                "Re-scan",
+                use_container_width=True,
+                key="full_report_rescan",
+            ):
+                st.session_state.audit_result = None
+                st.session_state.audit_plan = None
+                st.session_state.audit_id = None
+                st.session_state.report_signed_off = False
+                st.session_state.active_report_section = "Pipeline & findings"
+                st.rerun()
 
-            st.session_state.audit_result = None
+        with download_col:
+            pdf_report = build_pdf_report(
+                report
+            )
 
-            st.rerun()
+            st.download_button(
+                (
+                    "Download signed report"
+                    if st.session_state.report_signed_off
+                    else "Gate 2 approval required"
+                ),
+                data=pdf_report,
+                file_name="AegisML_Security_Audit_Report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                disabled=not st.session_state.report_signed_off,
+            )
 
-    with download_col:
-
-        pdf_report = build_pdf_report(
-            report
-        )
-
-        st.download_button(
-            "Download full report",
-            data=pdf_report,
-            file_name=(
-                "AegisML_Security_Audit_Report.pdf"
-            ),
-            mime="application/pdf",
-            use_container_width=True,
-        )

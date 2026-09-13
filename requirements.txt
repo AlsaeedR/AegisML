@@ -33,3 +33,4 @@ requests>=2.31.0
 # --- Web UI & Report Generation ---
 streamlit>=1.30.0
 reportlab>=4.0.0
+streamlit-agraph>=0.0.45
