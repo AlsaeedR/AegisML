@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -8,7 +8,9 @@ from .schemas import AuditReport
 
 
 def build_audit_report(
-    findings: List[Dict[str, Any]]
+    findings: List[Dict[str, Any]],
+    tool_context: Optional[str] = None,
+    validation_errors: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build the final structured AegisML audit report
@@ -30,6 +32,8 @@ def build_audit_report(
         _generate_evidence_informed_recommendations(
             applicable_for_recommendations,
             overall_risk,
+            tool_context=tool_context,
+            validation_errors=validation_errors,
         )
     )
 
@@ -71,6 +75,7 @@ def build_audit_report(
         _build_executive_summary(
             findings,
             overall_risk,
+            validation_errors=validation_errors,
         )
     )
 
@@ -516,6 +521,8 @@ def _get_fallback_recommendations(
 def _generate_evidence_informed_recommendations(
     findings: List[Dict[str, Any]],
     overall_risk: Dict[str, Any],
+    tool_context: Optional[str] = None,
+    validation_errors: Optional[str] = None,
 ) -> Tuple[
     List[Dict[str, Any]],
     List[str],
@@ -531,6 +538,15 @@ def _generate_evidence_informed_recommendations(
     try:
         llm = get_llm(
             temperature=0.2
+        )
+
+        tool_section = (
+            f"\nADDITIONAL ARCHITECTURAL & TELEMETRY TOOL FINDINGS:\n{tool_context}\n"
+            if tool_context else ""
+        )
+        error_section = (
+            f"\nATTENTION PRIOR VALIDATION ERRORS TO RESOLVE:\n{validation_errors}\n"
+            if validation_errors else ""
         )
 
         prompt = (
@@ -613,7 +629,9 @@ def _generate_evidence_informed_recommendations(
 
                             "CORRELATED FINDINGS WITH "
                             "EMPIRICAL EVIDENCE:\n"
-                            "{findings}\n\n"
+                            "{findings}\n"
+                            "{tool_section}"
+                            "{error_section}\n"
 
                             "Generate evidence-informed "
                             "remediation recommendations as JSON:"
@@ -635,6 +653,8 @@ def _generate_evidence_informed_recommendations(
                     findings,
                     indent=2,
                 ),
+                "tool_section": tool_section,
+                "error_section": error_section,
             }
         )
 
@@ -754,6 +774,7 @@ def _generate_evidence_informed_recommendations(
 def _build_executive_summary(
     findings: List[Dict[str, Any]],
     overall_risk: Dict[str, Any],
+    validation_errors: Optional[str] = None,
 ) -> str:
     """
     Generate a concise executive summary grounded
@@ -761,6 +782,11 @@ def _build_executive_summary(
     """
 
     llm = get_llm()
+
+    error_section = (
+        f"\nATTENTION PRIOR VALIDATION ERRORS TO RESOLVE:\n{validation_errors}\n"
+        if validation_errors else ""
+    )
 
     prompt = (
         ChatPromptTemplate
@@ -836,7 +862,8 @@ def _build_executive_summary(
                         "{overall_risk}\n\n"
 
                         "CORRELATED SECURITY FINDINGS:\n"
-                        "{findings}\n\n"
+                        "{findings}\n"
+                        "{error_section}\n"
 
                         "Write the executive summary."
                     ),
@@ -857,6 +884,7 @@ def _build_executive_summary(
                 findings,
                 indent=2,
             ),
+            "error_section": error_section,
         }
     )
 
