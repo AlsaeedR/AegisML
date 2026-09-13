@@ -10,6 +10,9 @@ class TestingAgentState(TypedDict, total=False):
     # Upstream data received from Agent 1
     agent_1_results: Optional[Dict[str, Any]]
 
+    # HITL session correlation (used to route real-time telemetry via SSE)
+    audit_id: Optional[str]
+
     # Artifact references and dataset configuration
     model_path: str
     dataset_path: str

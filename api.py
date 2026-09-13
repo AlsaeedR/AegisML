@@ -2,8 +2,10 @@ import os
 import shutil
 import tempfile
 import uuid
+import json as _json
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 
 from src.agents.pipeline_agent.pipeline_agent import run_pipeline_agent
 
@@ -15,6 +17,7 @@ from src.agents.testing_agent.graph import (
     node_forensic_diagnosis,
     node_aggregate_results,
 )
+from src.agents.testing_agent.telemetry_bus import create_stream, get_stream
 
 from src.agents.reporting_agent.reporting_agent import run_reporting_agent
 
@@ -146,6 +149,10 @@ def _execute_agent_2_with_approved_plan(
         "agent_1_results": session[
             "agent_1_result"
         ],
+
+        "audit_id": session.get(
+            "audit_id"
+        ),
 
         "model_path": session[
             "model_path"
@@ -376,9 +383,18 @@ def plan_audit(
             uuid.uuid4().hex
         )
 
+        # Register a telemetry stream for this audit so the frontend can
+        # subscribe to real-time container telemetry via SSE once
+        # /audit/execute starts the sandbox for this audit_id.
+        create_stream(audit_id)
+
         AUDIT_SESSIONS[
             audit_id
         ] = {
+            "audit_id": (
+                audit_id
+            ),
+
             "temp_dir": (
                 temp_dir
             ),
@@ -498,6 +514,56 @@ def plan_audit(
             status_code=500,
             detail=str(exc),
         )
+
+
+# =========================================================
+# REAL-TIME CONTAINER TELEMETRY (SSE)
+# =========================================================
+
+@app.get("/audit/{audit_id}/telemetry/stream")
+def stream_audit_telemetry(audit_id: str):
+    """
+    Server-Sent Events (SSE) endpoint streaming real-time sandbox
+    container telemetry (start, periodic CPU/memory/network stats,
+    per-test progress, completion) for a given audit_id.
+
+    The stream is registered when /audit/plan creates the audit
+    session, and closed automatically (a final {"event": "done"}
+    message is sent) once /audit/execute's sandbox dispatch finishes,
+    errors, or is skipped under the Zero-Trust policy.
+
+    Clients should open this connection right after receiving
+    awaiting_gate_1 from /audit/plan and keep it open through the
+    call to /audit/execute to observe the container run live.
+    """
+    stream = get_stream(audit_id)
+
+    if stream is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No active telemetry stream for this audit_id. "
+                "Either the audit_id is invalid, has already "
+                "completed and been cleaned up, or /audit/plan "
+                "was never called for it."
+            ),
+        )
+
+    def event_generator():
+        while True:
+            event = stream.get()
+            yield f"data: {_json.dumps(event, default=str)}\n\n"
+            if event.get("event") == "done":
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # =========================================================

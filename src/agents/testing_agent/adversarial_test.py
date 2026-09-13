@@ -124,8 +124,15 @@ def run_adversarial_test(
         }
 
     try:
+        # Respects an adaptive downscaling hint (e.g. after an OOM retry in
+        # sandbox_runner.py, which halves this value) - falls back to the
+        # standard default of 50 when no override is provided.
+        configured_sample_size = (
+            state.get("adversarial_config") or {}
+        ).get("sample_size", 50)
+
         sample_size = min(
-            50,
+            configured_sample_size,
             len(X_text),
         )
 
