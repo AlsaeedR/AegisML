@@ -1,3 +1,5 @@
+import os
+import importlib.util
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sklearn.feature_extraction.text import (
@@ -24,26 +26,23 @@ PREPROCESSOR_NAMES = (
 )
 
 
+def _load_module_from_path(path: str):
+    """Dynamically load a python module from a file path."""
+    try:
+        spec = importlib.util.spec_from_file_location("dynamic_pipeline_module", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception:
+        return None
+
+
 def _get_external_preprocessor(
     state: Dict[str, Any],
 ) -> Tuple[
     Optional[Callable[[str], Any]],
     Optional[str],
 ]:
-    """
-    Resolve an external text-preprocessing callable
-    supplied by the surrounding AegisML execution
-    state.
-
-    The testing agent may pass a callable directly
-    through one of the supported state keys. This
-    allows V2 to evaluate projects where text
-    cleaning happens before model.predict() rather
-    than inside the serialized sklearn Pipeline.
-
-    The model itself is not modified.
-    """
-
     candidate_keys = (
         "preprocess_function",
         "preprocessing_function",
@@ -64,6 +63,12 @@ def _get_external_preprocessor(
 
     module = state.get("pipeline_module")
 
+    # FIX: If module is not in state, dynamically load it from pipeline_path
+    if module is None:
+        pipeline_path = state.get("pipeline_path")
+        if pipeline_path and os.path.exists(pipeline_path):
+            module = _load_module_from_path(pipeline_path)
+
     if module is not None:
         for name in PREPROCESSOR_NAMES:
             candidate = getattr(
@@ -82,11 +87,6 @@ def _apply_external_preprocessor(
     preprocessor: Optional[Callable[[str], Any]],
     value: str,
 ) -> Any:
-    """
-    Apply an external preprocessing callable when
-    available. Otherwise return the original value.
-    """
-
     if preprocessor is None:
         return value
 
@@ -94,24 +94,6 @@ def _apply_external_preprocessor(
 
 
 def _contains_text_vectorizer(transformer) -> bool:
-    """
-    Recursively inspect sklearn-style preprocessing
-    containers to determine whether they contain a
-    raw-text vectorizer or text-oriented transformer.
-
-    This supports nested structures such as:
-
-        Pipeline
-            -> FeatureUnion
-                -> TfidfVectorizer
-                -> TfidfVectorizer
-                -> TfidfVectorizer
-
-    It also keeps the previous behavior for ordinary
-    pipelines whose first preprocessing step is a
-    direct text vectorizer.
-    """
-
     if transformer is None:
         return False
 
@@ -197,21 +179,6 @@ def _contains_text_vectorizer(transformer) -> bool:
 
 
 def _accepts_raw_text(model) -> bool:
-    """
-    Determine whether the uploaded model appears to
-    accept raw text directly.
-
-    V2 is intended to test malformed and edge-case
-    text handling at the preprocessing boundary.
-    Numeric-only pipelines are therefore treated as
-    not applicable for this specific dynamic test.
-
-    The detection supports both direct text
-    vectorizers and nested sklearn preprocessing
-    structures such as FeatureUnion, ColumnTransformer,
-    and nested Pipeline objects.
-    """
-
     if not hasattr(model, "steps"):
         return False
 
@@ -234,11 +201,6 @@ def _accepts_raw_text(model) -> bool:
 def _to_serializable_prediction(
     prediction: Any,
 ) -> Any:
-    """
-    Convert NumPy/scikit-learn prediction values
-    into JSON-serializable Python values.
-    """
-
     if hasattr(
         prediction,
         "item",
@@ -252,14 +214,6 @@ def _to_serializable_prediction(
 
 
 def _build_test_cases() -> List[Dict[str, str]]:
-    """
-    Define malformed and edge-case raw-text inputs.
-
-    These cases test preprocessing robustness only.
-    They are not intended to claim SQL injection,
-    XSS, or application-layer exploitability.
-    """
-
     return [
         {
             "name": "empty_input",
@@ -302,18 +256,6 @@ def _run_individual_tests(
         Callable[[str], Any]
     ] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Run each malformed input independently.
-
-    Besides prediction failures, V2 records observable
-    preprocessing degradation when an external text
-    preprocessor is available.
-
-    The semantic checks intentionally focus on
-    measurable transformations rather than claiming
-    application-layer injection vulnerabilities.
-    """
-
     results: List[Dict[str, Any]] = []
 
     semantic_case_names = {
@@ -458,15 +400,6 @@ def _run_batch_test(
         Callable[[str], Any]
     ] = None,
 ) -> Dict[str, Any]:
-    """
-    Test whether a batch containing several
-    malformed inputs can disrupt preprocessing
-    for the entire prediction request.
-
-    External preprocessing is applied to each item
-    before the batch is passed to model.predict().
-    """
-
     malformed_inputs = [
         case["input"]
         for case in test_cases
@@ -520,19 +453,6 @@ def _run_batch_test(
 def run_preprocess_checks(
     state: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    Run the V2 Preprocessing Attack Surface test.
-
-    The test evaluates whether a raw-text ML
-    pipeline safely handles malformed and
-    edge-case text inputs without preprocessing
-    failures.
-
-    This test measures preprocessing robustness.
-    It does not claim application-layer injection
-    vulnerabilities such as SQL injection or XSS.
-    """
-
     model = state.get(
         "model"
     )

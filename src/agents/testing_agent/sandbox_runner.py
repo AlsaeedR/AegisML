@@ -12,7 +12,7 @@ from .telemetry_bus import publish as publish_telemetry, close_stream
 
 def is_docker_available() -> bool:
     try:
-        res = subprocess.run(['docker', 'info'], capture_output=True, text=True, timeout=4)
+        res = subprocess.run(['docker', 'info'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=4)
         return res.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         return False
@@ -61,7 +61,7 @@ def _poll_container_stats(container_name: str, audit_id: Optional[str], stop_eve
 
 def _was_oom_killed(container_name: str) -> bool:
     try:
-        res = subprocess.run(['docker', 'inspect', '--format', '{{.State.OOMKilled}}', container_name], capture_output=True, text=True, timeout=5)
+        res = subprocess.run(['docker', 'inspect', '--format', '{{.State.OOMKilled}}', container_name], capture_output=True, text=True,encoding='utf-8', errors='replace',  timeout=5)
         return res.returncode == 0 and res.stdout.strip().lower() == 'true'
     except Exception:
         return False
@@ -105,13 +105,16 @@ def _run_in_docker(model_path: str, dataset_path: str, pipeline_path: str, vecto
         stop_stats_event = threading.Event()
         stats_thread = threading.Thread(target=_poll_container_stats, args=(container_name, audit_id, stop_stats_event, memory_limit_bytes), daemon=True)
         try:
-            proc = subprocess.Popen(docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,encoding='utf-8', errors='replace')
             stats_thread.start()
             try:
                 stdout, stderr = proc.communicate(timeout=timeout_seconds)
                 returncode = proc.returncode
             except subprocess.TimeoutExpired:
-                subprocess.run(['docker', 'kill', container_name], capture_output=True)
+                subprocess.run(['docker', 'kill', container_name], capture_output=True, 
+                    text=True, 
+                    encoding='utf-8', 
+                    errors='replace')
                 stdout, stderr = proc.communicate()
                 returncode = -1
             stop_stats_event.set()
