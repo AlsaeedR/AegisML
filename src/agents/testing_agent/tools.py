@@ -440,3 +440,24 @@ def make_forensic_diagnostic_tools(
         bound_query_attack_telemetry,
         bound_evaluate_hypothesis_correlation,
     ]
+
+
+def extract_target_ids(test_targets: Any) -> Optional[set]:
+    """Extracts target vulnerability IDs from string, list, or dict structures."""
+    if not test_targets:
+        return None
+    if isinstance(test_targets, dict) and "vulnerabilities" in test_targets:
+        items = test_targets["vulnerabilities"]
+    elif isinstance(test_targets, list):
+        items = test_targets
+    else:
+        return None
+
+    ids = set()
+    for item in items:
+        if isinstance(item, str):
+            ids.add(item)
+        elif isinstance(item, dict) and "id" in item:
+            ids.add(item["id"])
+    return ids or None
+

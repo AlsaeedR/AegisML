@@ -143,34 +143,25 @@ AegisML/
     ├── core/                         # Centralized platform services
     │   └── llm.py                    # Unified LLM factory and environment configuration
     └── agents/
-        ├── pipeline_agent/           # Agent 1: Static AST & Threat Modeling
-        │   ├── code_parser.py        # AST pipeline structural extraction
-        │   ├── networkx_utils.py     # NetworkX topology analysis
-        │   ├── schemas.py            # Pydantic v2 schemas for NIST threat modeling
-        │   ├── steps.py              # Prompt chains & indirect injection sanitization
-        │   ├── tools.py              # AST extraction and schema validation tools
-        │   ├── graph.py              # LangGraph StateGraph & self-repair loop
-        │   └── pipeline_agent.py     # Execution entry point
-        ├── testing_agent/            # Agent 2: Cognitive Dynamic Penetration Testing
-        │   ├── schemas.py            # Pydantic schemas for attack strategy & forensics
-        │   ├── tools.py              # LangChain tools for dataset profiling & budgets
-        │   ├── state.py              # TestingAgentState definition
-        │   ├── sandbox_runner.py     # Host-side Fail-Closed Zero-Trust Docker dispatcher
-        │   ├── sandbox_worker.py     # In-container test execution worker
-        │   ├── loader.py             # Artifact loading utilities (used inside sandbox)
-        │   ├── poisoning_test.py     # V1 empirical poisoning & label-flipping tests
-        │   ├── preprocess_test.py    # V2 preprocessing edge-case & fuzzing checks
-        │   ├── validation_test.py    # V3 data corruption retraining degradation tests
-        │   ├── adversarial_test.py   # V4 IBM ART HopSkipJump evasion attack
-        │   ├── graph.py              # 5-node cognitive LangGraph workflow
-        │   └── testing_agent.py      # Execution entry point
-        └── reporting_agent/          # Agent 3: Evidence-Informed Risk & Reporting
+        ├── pipeline_agent/           # Agent 1: Static AST & Threat Modeling (4 files)
+        │   ├── schemas.py            # Pydantic v2 schemas and PipelineAgentState
+        │   ├── parser.py             # AST visitor extraction & NetworkX topology analysis
+        │   ├── tools.py              # ReAct exploration tools, prompts, and semantic validators
+        │   └── pipeline_agent.py     # LangGraph workflow, reflection loops & run_pipeline_agent
+        ├── testing_agent/            # Agent 2: Cognitive Dynamic Penetration Testing (4 files + sandbox/)
+        │   ├── schemas.py            # TestingAgentState, constants, and strategy schemas
+        │   ├── tools.py              # Cognitive planning, perturbation budgets & diagnostic tools
+        │   ├── testing_agent.py      # LangGraph workflow, telemetry bus, tracing & run_testing_agent
+        │   ├── sandbox_runner.py     # Host-side Zero-Trust Docker sandbox lifecycle manager
+        │   └── sandbox/              # In-container dynamic execution sub-package
+        │       ├── worker.py         # Container execution worker coordinator
+        │       ├── loader.py         # Safe artifact loading & deserialization
+        │       └── attacks.py        # Unified dynamic tests (Poisoning, Evasion, Preprocess, Validation)
+        └── reporting_agent/          # Agent 3: Evidence-Informed Risk & Reporting (4 files)
             ├── schemas.py            # Pydantic v2 schemas for audit reports and findings
-            ├── tools.py              # Scoring, compilation, and schema validation tools
-            ├── risk_scoring.py       # Centralized quantitative risk calculation engine
-            ├── report_builder.py     # Evidence-informed recommendation engine & summary
-            ├── graph.py              # LangGraph correlation and reporting workflow
-            └── reporting_agent.py    # Execution entry point
+            ├── risk_scoring.py       # Centralized NIST AI 100-2 mathematical risk scoring engine
+            ├── tools.py              # Active reporting tools, summary synthesis & report builder
+            └── reporting_agent.py    # LangGraph workflow, correlation loops & run_reporting_agent
 ```
 
 ---

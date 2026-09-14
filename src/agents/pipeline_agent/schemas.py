@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 
 
@@ -113,4 +113,23 @@ class VulnerabilitiesReport(BaseModel):
     vulnerabilities: List[VulnerabilityFinding] = Field(
         description="Collection of findings for the four MVP vulnerability classes."
     )
+
+
+class PipelineAgentState(TypedDict, total=False):
+    """
+    Internal state for Agent 1 (Pipeline & Threat Modeling Agent).
+    Maintains code artifacts, extracted topological graphs, intermediate LLM
+    reasoning outputs, and validation feedback used in self-correction loops.
+    """
+    code: str
+    pipeline_graph: dict
+    networkx_graph: Any
+    graph_topology: dict
+    threat_model: dict
+    vulnerability_findings: dict
+    testing_agent_results: Optional[dict]
+    validation_errors: Optional[str]
+    retry_count: int
+    max_retries: int
+    status: str
 

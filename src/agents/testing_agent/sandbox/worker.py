@@ -4,17 +4,19 @@ import json
 import time
 from typing import Any, Dict, List
 
-from .constants import TEST_ORDER
+from ..schemas import TEST_ORDER
 from .loader import (
     load_trained_model,
     load_dataset,
     load_vectorizer,
     resolve_vectorizer_from_agent1,
 )
-from .poisoning_test import run_poisoning_test
-from .adversarial_test import run_adversarial_test
-from .preprocess_test import run_preprocess_checks
-from .validation_test import run_validation_checks
+from .attacks import (
+    run_poisoning_test,
+    run_adversarial_test,
+    run_preprocess_checks,
+    run_validation_checks,
+)
 
 
 def execute_worker():
@@ -28,7 +30,7 @@ def execute_worker():
 
     start_time = time.time()
     execution_log: List[str] = []
-    
+
     if not os.path.exists(input_file):
         error_payload = {
             "status": "error",
@@ -51,7 +53,6 @@ def execute_worker():
     agent_1_results = strategy.get("agent_1_results")
     planned_tests = strategy.get("planned_tests", list(TEST_ORDER))
 
-    
     # Attack configs
     adv_config = strategy.get("adversarial_config", {})
     poison_config = strategy.get("poisoning_config", {})
@@ -64,7 +65,6 @@ def execute_worker():
     }
 
     try:
-        # Load artifacts safely inside container
         execution_log.append(f"Loading model from {model_path} and dataset from {dataset_path}")
         model = load_trained_model(model_path)
         X_text, y_true = load_dataset(dataset_path, text_column, label_column)

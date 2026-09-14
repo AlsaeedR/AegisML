@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
-from .telemetry_bus import publish as publish_telemetry, close_stream
+from .testing_agent import publish as publish_telemetry, close_stream
 
 def is_docker_available() -> bool:
     try:
@@ -100,7 +100,18 @@ def _run_in_docker(model_path: str, dataset_path: str, pipeline_path: str, vecto
         with open(input_json_path, 'w', encoding='utf-8') as f:
             json.dump(strategy_payload, f, indent=2, default=str)
         src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        docker_cmd = ['docker', 'run', '--name', container_name, '--network', 'none', '--memory', memory_limit, '--cpus', '2.0', '--pids-limit', '128', '-v', f'{data_dir}:/workspace/data:ro', '-v', f'{input_dir}:/workspace/input:ro', '-v', f'{output_dir}:/workspace/output:rw', '-v', f'{src_dir}:/app/src:ro', image_name]
+        docker_cmd = [
+            'docker', 'run', '--name', container_name,
+            '--network', 'none', '--memory', memory_limit,
+            '--cpus', '2.0', '--pids-limit', '128',
+            '-v', f'{data_dir}:/workspace/data:ro',
+            '-v', f'{input_dir}:/workspace/input:ro',
+            '-v', f'{output_dir}:/workspace/output:rw',
+            '-v', f'{src_dir}:/app/src:ro',
+            '--entrypoint', 'python',
+            image_name,
+            '-m', 'src.agents.testing_agent.sandbox.worker',
+        ]
         publish_telemetry(audit_id, {'event': 'container_starting', 'container_id': container_name, 'attempt': attempt, 'planned_tests': planned_tests})
         stop_stats_event = threading.Event()
         stats_thread = threading.Thread(target=_poll_container_stats, args=(container_name, audit_id, stop_stats_event, memory_limit_bytes), daemon=True)
@@ -168,11 +179,13 @@ def _build_fail_closed_skip_response(planned_tests: List[str], reason: str) -> D
     return {'sandbox_status': 'skipped_zero_trust', 'planned_tests': planned_tests, 'poisoning_evidence': _make_skip('V1', 'Data Poisoning'), 'preprocessing_evidence': _make_skip('V2', 'Preprocessing Attack Surface'), 'validation_evidence': _make_skip('V3', 'Data Validation Weaknesses'), 'adversarial_evidence': _make_skip('V4', 'Adversarial Robustness'), 'execution_log': ['Zero-Trust Policy Gate: Docker daemon offline.', 'Dynamic testing aborted on host to prevent untrusted code execution.', 'Passed unverified status to Agent 3 for static-only reporting.'], 'telemetry': {'execution_mode': 'fail_closed_skip', 'docker_available': False}}
 
 def _run_insecure_local(model_path: str, dataset_path: str, pipeline_path: str, vectorizer_path: Optional[str], text_column: str, label_column: str, planned_tests: List[str], strategy_config: Optional[Dict[str, Any]], agent_1_results: Optional[Dict[str, Any]], audit_id: Optional[str]=None) -> Dict[str, Any]:
-    from .loader import load_trained_model, load_dataset, load_vectorizer, resolve_vectorizer_from_agent1
-    from .poisoning_test import run_poisoning_test
-    from .adversarial_test import run_adversarial_test
-    from .preprocess_test import run_preprocess_checks
-    from .validation_test import run_validation_checks
+    from .sandbox.loader import load_trained_model, load_dataset, load_vectorizer, resolve_vectorizer_from_agent1
+    from .sandbox.attacks import (
+        run_poisoning_test,
+        run_adversarial_test,
+        run_preprocess_checks,
+        run_validation_checks,
+    )
     results: Dict[str, Any] = {'sandbox_status': 'executed_insecure_local', 'planned_tests': planned_tests, 'execution_log': ['Executed in-process via developer override.']}
     model = load_trained_model(model_path)
     X_text, y_true = load_dataset(dataset_path, text_column, label_column)

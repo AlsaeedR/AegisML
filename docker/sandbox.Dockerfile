@@ -45,5 +45,5 @@ COPY --chown=aegis:aegis src/ /app/src/
 USER aegis
 
 # Entrypoint executes the sandbox worker
-ENTRYPOINT ["python", "-m", "src.agents.testing_agent.sandbox_worker"]
+ENTRYPOINT ["python", "-m", "src.agents.testing_agent.sandbox.worker"]
 

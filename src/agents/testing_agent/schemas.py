@@ -1,5 +1,22 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 from pydantic import BaseModel, Field
+
+# Canonical execution order for the 4 MVP vulnerability tests
+TEST_ORDER = [
+    "V1_poisoning",
+    "V4_adversarial",
+    "V2_preprocessing",
+    "V3_validation",
+]
+
+# Canonical mapping from short vulnerability IDs to human-readable names
+MVP_VULNERABILITIES: List[Tuple[str, str]] = [
+    ("V1", "Data Poisoning"),
+    ("V4", "Adversarial Robustness"),
+    ("V2", "Preprocessing Attack Surface"),
+    ("V3", "Data Validation Weaknesses"),
+]
+
 
 
 class AdversarialAttackConfig(BaseModel):
@@ -159,4 +176,34 @@ class ForensicAnalysisReport(BaseModel):
         default="",
         description="Holistic post-attack forensic assessment for the target pipeline."
     )
+
+
+class TestingAgentState(TypedDict, total=False):
+    agent_1_results: Optional[Dict[str, Any]]
+    audit_id: Optional[str]
+    model_path: str
+    dataset_path: str
+    pipeline_path: str
+    vectorizer_path: Optional[str]
+    text_column: str
+    label_column: str
+    test_targets: Optional[List[str]]
+    dataset_profile: Optional[Dict[str, Any]]
+    attack_strategy_plan: Optional[Dict[str, Any]]
+    planned_tests: List[str]
+    execution_plan_log: List[str]
+    model: Any
+    vectorizer: Optional[Any]
+    X_text: List[str]
+    y_true: List[Any]
+    sandbox_status: str
+    sandbox_telemetry: Optional[Dict[str, Any]]
+    poisoning_evidence: Dict[str, Any]
+    adversarial_evidence: Dict[str, Any]
+    preprocessing_evidence: Dict[str, Any]
+    validation_evidence: Dict[str, Any]
+    forensic_analysis: Optional[Dict[str, Any]]
+    hypothesis_verifications: List[Dict[str, Any]]
+    structured_test_results: Dict[str, Any]
+    status: str
 
