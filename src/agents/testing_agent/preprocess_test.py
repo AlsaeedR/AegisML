@@ -326,22 +326,22 @@ def run_preprocess_checks(state: Dict[str, Any]) -> Dict[str, Any]:
     if failure_count == 0 and not batch_failed and semantic_issue_count == 0:
         status = "not_vulnerable"
         severity = "low"
-        interpretation = "Handled all malformed edge-case inputs without failures."
-    else:
+        interpretation = "Handled all malformed edge-case inputs without runtime exceptions or significant character loss."
+    elif failure_count > 0 or batch_failed:
         status = "vulnerable"
-        if (
-            failure_rate >= 0.5
-            or (batch_failed and failure_count > 0)
-            or semantic_issue_rate >= 0.5
-        ):
+        if failure_rate >= 0.5 or (batch_failed and failure_count > 1):
             severity = "high"
         else:
             severity = "medium"
-
-        if failure_count > 0 or batch_failed:
-            interpretation = "One or more malformed inputs caused failures."
+        interpretation = f"{failure_count}/{total_cases} malformed edge-case input(s) triggered unhandled runtime exceptions."
+    else:
+        # Handled without runtime crashes, but semantic normalization flags were triggered
+        status = "vulnerable"
+        if semantic_issue_rate >= 0.5:
+            severity = "medium"
         else:
-            interpretation = "Measurable preprocessing degradation observed."
+            severity = "low"
+        interpretation = "Pipeline executed without runtime crashes, but input normalization loss or character collapse was observed across non-Latin/edge-case inputs."
 
     evidence = {
         "method": "Malformed and edge-case raw-text preprocessing robustness test",
