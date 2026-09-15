@@ -28,6 +28,9 @@ def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
         if result.get("vulnerability_id")
     }
 
+    pipeline_graph = agent_1.get("pipeline_graph")
+    threat_model = agent_1.get("threat_model")
+
     correlated_findings: List[Dict[str, Any]] = []
 
     for static_finding in static_findings:
@@ -55,7 +58,11 @@ def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
             "evidence": dynamic_result.get("evidence", {}),
         }
 
-        final_risk = score_finding_tool(correlated_finding)
+        final_risk = score_finding_tool(
+            correlated_finding,
+            pipeline_graph=pipeline_graph,
+            threat_model=threat_model,
+        )
         correlated_finding.update(final_risk)
         correlated_findings.append(correlated_finding)
 

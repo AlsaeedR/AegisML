@@ -104,6 +104,18 @@ class VulnerabilityFinding(BaseModel):
         default=None,
         description="Numerical risk score (0-10) calculated by the risk scoring module."
     )
+    static_impact: Optional[float] = Field(
+        default=None,
+        description="Dynamically estimated static impact (0-10) based on pipeline blast radius."
+    )
+    static_likelihood: Optional[float] = Field(
+        default=None,
+        description="Dynamically estimated static likelihood (0-10) based on trust boundary exposure and controls."
+    )
+    static_score_rationale: Optional[str] = Field(
+        default=None,
+        description="Architectural rationale explaining the dynamic static impact and likelihood derivation."
+    )
 
 
 class VulnerabilitiesReport(BaseModel):

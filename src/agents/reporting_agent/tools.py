@@ -357,9 +357,13 @@ def build_audit_report(
 # Governance & Risk Scoring ReAct Tools
 # ---------------------------------------------------------------------------
 
-def score_finding_tool(finding: Dict[str, Any]) -> Dict[str, Any]:
-    """Tool wrapping the NIST AI 100-2 evidence-informed risk calculation for a finding."""
-    return calculate_final_risk(finding)
+def score_finding_tool(
+    finding: Dict[str, Any],
+    pipeline_graph: Optional[Dict[str, Any]] = None,
+    threat_model: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Tool wrapping the NIST AI 100-2 evidence-informed dynamic risk calculation for a finding."""
+    return calculate_final_risk(finding, pipeline_graph=pipeline_graph, threat_model=threat_model)
 
 
 def compile_audit_report_tool(

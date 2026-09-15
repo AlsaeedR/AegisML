@@ -17,25 +17,15 @@ def is_docker_available() -> bool:
     except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
         return False
 
-def is_insecure_local_allowed() -> bool:
-    return os.getenv('AEGISML_ALLOW_INSECURE_LOCAL_TESTING', 'false').lower() in ('true', '1', 'yes')
-
 def dispatch_sandbox(model_path: str, dataset_path: str, pipeline_path: str, vectorizer_path: Optional[str], text_column: str, label_column: str, planned_tests: List[str], strategy_config: Optional[Dict[str, Any]]=None, agent_1_results: Optional[Dict[str, Any]]=None, timeout_seconds: int=180, audit_id: Optional[str]=None, max_oom_retries: Optional[int]=None) -> Dict[str, Any]:
-    docker_ready = is_docker_available()
-    allow_insecure = is_insecure_local_allowed()
-    if not docker_ready and (not allow_insecure):
+    if not is_docker_available():
         print('\n[AegisML Security Gate] Docker sandbox is unavailable. Zero-Trust policy active: untrusted model/code will NOT be executed on host. Marking dynamic tests as skipped.')
         publish_telemetry(audit_id, {'event': 'sandbox_skipped', 'reason': 'docker_unavailable'})
         result = _build_fail_closed_skip_response(planned_tests=planned_tests, reason='Zero-Trust sandbox policy active: Docker daemon is unavailable. Untrusted model deserialization and pipeline execution were halted to protect the host environment from potential RCE or resource exhaustion.')
         close_stream(audit_id)
         return result
-    if docker_ready:
-        result = _run_in_docker(model_path=model_path, dataset_path=dataset_path, pipeline_path=pipeline_path, vectorizer_path=vectorizer_path, text_column=text_column, label_column=label_column, planned_tests=planned_tests, strategy_config=strategy_config, agent_1_results=agent_1_results, timeout_seconds=timeout_seconds, audit_id=audit_id, max_oom_retries=max_oom_retries if max_oom_retries is not None else int(os.getenv('AEGISML_MAX_OOM_RETRIES', '1')))
-        close_stream(audit_id)
-        return result
-    print('\n[SECURITY WARNING] AEGISML_ALLOW_INSECURE_LOCAL_TESTING=true is set. Executing untrusted artifacts directly in host process!')
-    publish_telemetry(audit_id, {'event': 'sandbox_start', 'mode': 'insecure_local'})
-    result = _run_insecure_local(model_path=model_path, dataset_path=dataset_path, pipeline_path=pipeline_path, vectorizer_path=vectorizer_path, text_column=text_column, label_column=label_column, planned_tests=planned_tests, strategy_config=strategy_config, agent_1_results=agent_1_results, audit_id=audit_id)
+
+    result = _run_in_docker(model_path=model_path, dataset_path=dataset_path, pipeline_path=pipeline_path, vectorizer_path=vectorizer_path, text_column=text_column, label_column=label_column, planned_tests=planned_tests, strategy_config=strategy_config, agent_1_results=agent_1_results, timeout_seconds=timeout_seconds, audit_id=audit_id, max_oom_retries=max_oom_retries if max_oom_retries is not None else int(os.getenv('AEGISML_MAX_OOM_RETRIES', '1')))
     close_stream(audit_id)
     return result
 
@@ -177,44 +167,3 @@ def _build_fail_closed_skip_response(planned_tests: List[str], reason: str) -> D
     def _make_skip(vid: str, name: str) -> Dict[str, Any]:
         return {'vulnerability_id': vid, 'vulnerability_name': name, 'status': 'unverified', 'severity': None, 'evidence': {'status': 'skipped', 'reason': reason}, 'summary': 'Dynamic test skipped: Docker sandbox isolation required by Zero-Trust policy.'}
     return {'sandbox_status': 'skipped_zero_trust', 'planned_tests': planned_tests, 'poisoning_evidence': _make_skip('V1', 'Data Poisoning'), 'preprocessing_evidence': _make_skip('V2', 'Preprocessing Attack Surface'), 'validation_evidence': _make_skip('V3', 'Data Validation Weaknesses'), 'adversarial_evidence': _make_skip('V4', 'Adversarial Robustness'), 'execution_log': ['Zero-Trust Policy Gate: Docker daemon offline.', 'Dynamic testing aborted on host to prevent untrusted code execution.', 'Passed unverified status to Agent 3 for static-only reporting.'], 'telemetry': {'execution_mode': 'fail_closed_skip', 'docker_available': False}}
-
-def _run_insecure_local(model_path: str, dataset_path: str, pipeline_path: str, vectorizer_path: Optional[str], text_column: str, label_column: str, planned_tests: List[str], strategy_config: Optional[Dict[str, Any]], agent_1_results: Optional[Dict[str, Any]], audit_id: Optional[str]=None) -> Dict[str, Any]:
-    from .sandbox.loader import load_trained_model, load_dataset, load_vectorizer, resolve_vectorizer_from_agent1
-    from .sandbox.attacks import (
-        run_poisoning_test,
-        run_adversarial_test,
-        run_preprocess_checks,
-        run_validation_checks,
-    )
-    results: Dict[str, Any] = {'sandbox_status': 'executed_insecure_local', 'planned_tests': planned_tests, 'execution_log': ['Executed in-process via developer override.']}
-    model = load_trained_model(model_path)
-    X_text, y_true = load_dataset(dataset_path, text_column, label_column)
-    if not vectorizer_path:
-        base_dir = os.path.dirname(dataset_path) or 'data'
-        vectorizer_path = resolve_vectorizer_from_agent1(agent_1_results, base_dir=base_dir)
-    vectorizer = load_vectorizer(vectorizer_path)
-    if vectorizer is not None and (not hasattr(model, 'steps')):
-        from sklearn.pipeline import Pipeline as _SkPipeline
-        model = _SkPipeline([('vectorizer', vectorizer), ('classifier', model)])
-    test_state = {'model': model, 'vectorizer': vectorizer, 'X_text': X_text, 'y_true': y_true, 'pipeline_path': pipeline_path if os.path.exists(pipeline_path) else None, 'adversarial_config': strategy_config}
-    if 'V1_poisoning' in planned_tests:
-        publish_telemetry(audit_id, {'event': 'test_start', 'test_id': 'V1_poisoning'})
-        p_res = run_poisoning_test(test_state)
-        results['poisoning_evidence'] = p_res.get('poisoning_evidence', {})
-        publish_telemetry(audit_id, {'event': 'test_complete', 'test_id': 'V1_poisoning', 'status': results['poisoning_evidence'].get('status')})
-    if 'V4_adversarial' in planned_tests:
-        publish_telemetry(audit_id, {'event': 'test_start', 'test_id': 'V4_adversarial'})
-        a_res = run_adversarial_test(test_state)
-        results['adversarial_evidence'] = a_res.get('adversarial_evidence', {})
-        publish_telemetry(audit_id, {'event': 'test_complete', 'test_id': 'V4_adversarial', 'status': results['adversarial_evidence'].get('status')})
-    if 'V2_preprocessing' in planned_tests:
-        publish_telemetry(audit_id, {'event': 'test_start', 'test_id': 'V2_preprocessing'})
-        prep_res = run_preprocess_checks(test_state)
-        results['preprocessing_evidence'] = prep_res.get('preprocessing_evidence', {})
-        publish_telemetry(audit_id, {'event': 'test_complete', 'test_id': 'V2_preprocessing', 'status': results['preprocessing_evidence'].get('status')})
-    if 'V3_validation' in planned_tests:
-        publish_telemetry(audit_id, {'event': 'test_start', 'test_id': 'V3_validation'})
-        val_res = run_validation_checks(test_state)
-        results['validation_evidence'] = val_res.get('validation_evidence', {})
-        publish_telemetry(audit_id, {'event': 'test_complete', 'test_id': 'V3_validation', 'status': results['validation_evidence'].get('status')})
-    return results

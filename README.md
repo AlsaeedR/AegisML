@@ -115,10 +115,9 @@ sequenceDiagram
     end
 ```
 
-### Fail-Closed Policy & Developer Override
+### Strict Zero-Trust Fail-Closed Policy
 
-* **Production / Default (Fail-Closed)**: If Docker is offline or uninstalled, AegisML **refuses** to execute untrusted models in-process. Dynamic tests are safely skipped to protect the host against Remote Code Execution (`__reduce__` deserialization attacks), and Agent 3 produces a static-only report with an explanatory security note.
-* **Offline Dev Override**: If you are developing locally without Docker and trust the evaluation artifacts, set `AEGISML_ALLOW_INSECURE_LOCAL_TESTING=true` in your `.env` to allow in-process execution with visible security warnings.
+* **Strict Fail-Closed Policy**: If Docker is offline or uninstalled, AegisML strictly **refuses** to execute untrusted models or dynamic attacks in the host process under any circumstances. Untrusted ML model deserialization and pipeline execution are halted to protect the host environment against Remote Code Execution (`__reduce__` pickle attacks) and resource exhaustion. Dynamic tests are marked as `unverified` under the Zero-Trust policy, and Agent 3 produces a static-only report with an auditable security justification.
 
 ---
 
