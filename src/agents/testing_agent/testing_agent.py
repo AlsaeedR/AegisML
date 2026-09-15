@@ -324,6 +324,13 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
     log = list(state.get("execution_plan_log") or [])
     planned_tests = state.get("planned_tests", TEST_ORDER)
     strategy_config = state.get("attack_strategy_plan", {})
+    audit_id = state.get("audit_id")
+    publish(audit_id, {
+        "event": "agent_step_started",
+        "agent": "Agent 2",
+        "step": "Dynamic security testing",
+        "message": f"Running approved tests: {', '.join(planned_tests)}",
+    })
     log.append(f"Dispatching dynamic tests to sandbox orchestrator: {planned_tests}")
 
     resolved_text_col = (
@@ -347,10 +354,17 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
         planned_tests=planned_tests,
         strategy_config=strategy_config,
         agent_1_results=state.get("agent_1_results"),
-        audit_id=state.get("audit_id"),
+        audit_id=audit_id,
     )
 
     log.extend(sandbox_result.get("execution_log", []))
+    publish(audit_id, {
+        "event": "agent_step_finished",
+        "agent": "Agent 2",
+        "step": "Dynamic security testing",
+        "status": sandbox_result.get("sandbox_status", "unknown"),
+        "message": "Dynamic tests completed." if sandbox_result.get("sandbox_status") == "executed" else "Dynamic tests finished with a guarded status.",
+    })
     return {
         "sandbox_status": sandbox_result.get("sandbox_status", "unknown"),
         "sandbox_telemetry": sandbox_result.get("telemetry", {}),
@@ -366,10 +380,16 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
     log = list(state.get("execution_plan_log") or [])
     sandbox_status = state.get("sandbox_status", "")
     agent_1 = state.get("agent_1_results") or {}
+    publish(state.get("audit_id"), {
+        "event": "agent_step_started",
+        "agent": "Agent 2",
+        "step": "Forensic diagnosis",
+        "message": "Correlating empirical evidence with Agent 1 hypotheses.",
+    })
 
     if sandbox_status == "skipped_zero_trust":
         log.append("Dynamic tests skipped under Zero-Trust policy. Forensic analysis deferred.")
-        return {
+        result = {
             "forensic_analysis": {
                 "overall_forensic_summary": (
                     "Empirical penetration testing was halted on the host because the Docker sandbox was offline. "
@@ -379,6 +399,14 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
             },
             "execution_plan_log": log,
         }
+        publish(state.get("audit_id"), {
+            "event": "agent_step_finished",
+            "agent": "Agent 2",
+            "step": "Forensic diagnosis",
+            "status": "skipped_zero_trust",
+            "message": "Forensic review recorded the guarded skip.",
+        })
+        return result
 
     evidence_bundle = {
         "V1_poisoning": state.get("poisoning_evidence"),
@@ -389,10 +417,18 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
 
     if not is_llm_available():
         fallback_forensics = _get_default_forensic_report(evidence_bundle)
-        return {
+        result = {
             "forensic_analysis": fallback_forensics.model_dump(),
             "execution_plan_log": log,
         }
+        publish(state.get("audit_id"), {
+            "event": "agent_step_finished",
+            "agent": "Agent 2",
+            "step": "Forensic diagnosis",
+            "status": "completed",
+            "message": "Deterministic forensic diagnosis completed.",
+        })
+        return result
 
     try:
         diag_tools = make_forensic_diagnostic_tools(
@@ -447,11 +483,25 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
             report = ForensicAnalysisReport.model_validate(report)
 
         log.append("Cognitive forensic diagnosis completed successfully via tool-empowered investigation.")
+        publish(state.get("audit_id"), {
+            "event": "agent_step_finished",
+            "agent": "Agent 2",
+            "step": "Forensic diagnosis",
+            "status": "completed",
+            "message": "Forensic diagnosis completed.",
+        })
         return {"forensic_analysis": report.model_dump(), "execution_plan_log": log}
 
     except Exception as e:
         log.append(f"LLM forensic diagnosis encountered error ({str(e)}). Used deterministic fallback.")
         fallback = _get_default_forensic_report(evidence_bundle)
+        publish(state.get("audit_id"), {
+            "event": "agent_step_finished",
+            "agent": "Agent 2",
+            "step": "Forensic diagnosis",
+            "status": "fallback",
+            "message": "Forensic diagnosis used a deterministic fallback.",
+        })
         return {"forensic_analysis": fallback.model_dump(), "execution_plan_log": log}
 
 

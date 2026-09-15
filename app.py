@@ -3,6 +3,9 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict
+import queue
+import threading
+import time
 
 import requests
 import streamlit as st
@@ -44,6 +47,133 @@ def clean_executive_summary(summary: Any) -> str:
         flags=re.IGNORECASE,
     )
 
+def render_agent_progress(
+    progress_placeholder: Any,
+    events: list[Dict[str, Any]],
+) -> None:
+    """Render the current multi-agent execution timeline in place."""
+    stages = [
+        ("Agent 1", "Static threat analysis", "Complete"),
+        ("Agent 2", "Dynamic security testing", "Waiting"),
+        ("Agent 2", "Forensic diagnosis", "Waiting"),
+        ("Agent 3", "Evidence-informed reporting", "Waiting"),
+    ]
+
+    latest_by_step = {
+        event.get("step"): event
+        for event in events
+        if event.get("step")
+    }
+
+    rows = []
+    for agent, step, default_status in stages:
+        event = latest_by_step.get(step, {})
+        event_type = event.get("event")
+        if event_type != "agent_step_started":
+            continue
+
+        if event_type == "agent_step_started":
+            status = "Running"
+            marker = "running"
+        elif event_type == "agent_step_finished":
+            status = str(event.get("status", "Complete")).replace("_", " ").title()
+            marker = "complete"
+        elif default_status == "Complete":
+            status = default_status
+            marker = "complete"
+        elif step == "Approved attack strategy" and step in latest_by_step:
+            status = "Approved"
+            marker = "complete"
+        else:
+            status = default_status
+            marker = "waiting"
+
+        message = event.get("message", "")
+        rows.append(
+            f"""
+            <div class="agent-progress-row">
+                <span class="agent-progress-marker {marker}"></span>
+                <div class="agent-progress-copy">
+                    <div class="agent-progress-step"><strong>{agent}</strong> · {step}</div>
+                    <div class="agent-progress-message">{message or status}</div>
+                </div>
+                <span class="agent-progress-status {marker}">{status}</span>
+            </div>
+            """
+        )
+
+    progress_placeholder.html(
+        """
+        <div class="agent-progress-panel">
+            <div class="agent-progress-heading">Audit execution</div>
+            <div class="agent-progress-subheading">Live agent activity</div>
+            {rows}
+        </div>
+        """.format(rows="".join(rows)),
+    )
+
+
+def run_approved_audit_with_progress(
+    audit_id: str,
+    progress_placeholder: Any,
+) -> requests.Response:
+    """Execute the approved audit while streaming agent telemetry to the UI."""
+    event_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
+    response_holder: Dict[str, Any] = {}
+    events: list[Dict[str, Any]] = []
+
+    def read_telemetry() -> None:
+        try:
+            with requests.get(
+                f"{API_URL}/audit/{audit_id}/telemetry/stream",
+                stream=True,
+                timeout=(10, 900),
+            ) as stream_response:
+                stream_response.raise_for_status()
+                for raw_line in stream_response.iter_lines(decode_unicode=True):
+                    if not raw_line or not raw_line.startswith("data: "):
+                        continue
+                    event_queue.put(json.loads(raw_line[6:]))
+        except Exception as exc:
+            event_queue.put({"event": "telemetry_error", "message": str(exc)})
+
+    def execute_audit() -> None:
+        try:
+            response_holder["response"] = requests.post(
+                f"{API_URL}/audit/execute",
+                data={"audit_id": audit_id},
+                timeout=900,
+            )
+        except Exception as exc:
+            response_holder["error"] = exc
+
+    telemetry_thread = threading.Thread(target=read_telemetry, daemon=True)
+    execute_thread = threading.Thread(target=execute_audit, daemon=True)
+    telemetry_thread.start()
+    execute_thread.start()
+
+    render_agent_progress(progress_placeholder, events)
+    while execute_thread.is_alive() or not event_queue.empty():
+        try:
+            while True:
+                event = event_queue.get_nowait()
+                if event.get("event") != "done":
+                    events.append(event)
+                render_agent_progress(progress_placeholder, events)
+        except queue.Empty:
+            pass
+        time.sleep(0.15)
+
+    execute_thread.join()
+    while not event_queue.empty():
+        event = event_queue.get_nowait()
+        if event.get("event") != "done":
+            events.append(event)
+    render_agent_progress(progress_placeholder, events)
+
+    if "error" in response_holder:
+        raise response_holder["error"]
+    return response_holder["response"]
 
 # ---------------------------------------------------------
 # PDF report generation
@@ -987,11 +1117,11 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
 
     if render_attack_strategy_gate(st.session_state.audit_plan):
         try:
+            progress_placeholder = st.empty()
             with st.spinner("Running approved dynamic tests and evidence correlation..."):
-                response = requests.post(
-                    f"{API_URL}/audit/execute",
-                    data={"audit_id": st.session_state.audit_id},
-                    timeout=600,
+                response = run_approved_audit_with_progress(
+                    st.session_state.audit_id,
+                    progress_placeholder,
                 )
 
             if response.status_code != 200:
@@ -1200,6 +1330,18 @@ if st.session_state.audit_result is None:
             }
 
             try:
+                planning_progress = st.empty()
+                render_agent_progress(
+                    planning_progress,
+                    [
+                        {
+                            "event": "agent_step_started",
+                            "agent": "Agent 1",
+                            "step": "Static threat analysis",
+                            "message": "Parsing the pipeline and building the threat model.",
+                        }
+                    ],
+                )
 
                 with st.spinner(
                     "AegisML is analysing the ML pipeline..."

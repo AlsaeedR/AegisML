@@ -95,14 +95,19 @@ def execute_planned_audit(audit_id: str=Form(...)):
     if not session:
         raise HTTPException(status_code=404, detail='Audit planning session not found or expired.')
     try:
+        from src.agents.testing_agent.testing_agent import publish
         agent_2_result = _execute_agent_2_with_approved_plan(session)
+        publish(audit_id, {'event': 'agent_step_started', 'agent': 'Agent 3', 'step': 'Evidence-informed reporting', 'message': 'Correlating static findings and dynamic evidence.'})
         reporting_result = run_reporting_agent(agent_1_results=session['agent_1_result'], agent_2_results=agent_2_result)
+        publish(audit_id, {'event': 'agent_step_finished', 'agent': 'Agent 3', 'step': 'Evidence-informed reporting', 'status': 'completed', 'message': 'Final security report is ready.'})
         return {'status': 'awaiting_gate_2', 'audit_id': audit_id, 'report': reporting_result.get('final_report'), 'deployment_context': _deployment_context(session['agent_1_result']), 'pipeline_graph': session['agent_1_result'].get('pipeline_graph', {}), 'pipeline_source': session['pipeline_source'], 'attack_strategy_plan': session['attack_strategy_plan']}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
+        from src.agents.testing_agent.testing_agent import close_stream
+        close_stream(audit_id)
         shutil.rmtree(session.get('temp_dir', ''), ignore_errors=True)
         AUDIT_SESSIONS.pop(audit_id, None)
 

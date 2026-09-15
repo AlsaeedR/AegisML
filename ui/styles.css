@@ -923,3 +923,90 @@ div[data-testid="stExpander"] summary {
     color: #5c6157 !important;
     letter-spacing: 0.2px !important;
 }
+
+
+/* LIVE AGENT PROGRESS */
+
+.agent-progress-panel {
+    margin: 22px 0 8px;
+    padding: 18px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+}
+
+.agent-progress-heading {
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.agent-progress-subheading {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.agent-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 0;
+    border-bottom: 1px solid #e6e7e1;
+}
+
+.agent-progress-row:last-child {
+    border-bottom: 0;
+    padding-bottom: 2px;
+}
+
+.agent-progress-marker {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+    border-radius: 50%;
+    background: #c8cac3;
+}
+
+.agent-progress-marker.complete {
+    background: var(--green);
+}
+
+.agent-progress-marker.running {
+    background: var(--gold);
+    box-shadow: 0 0 0 4px rgba(162, 125, 49, 0.14);
+}
+
+.agent-progress-copy {
+    min-width: 0;
+    flex: 1;
+}
+
+.agent-progress-step {
+    color: var(--text);
+    font-size: 13px;
+}
+
+.agent-progress-message {
+    overflow: hidden;
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-progress-status {
+    color: var(--muted);
+    font-family: monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+}
+
+.agent-progress-status.complete {
+    color: var(--green);
+}
+
+.agent-progress-status.running {
+    color: var(--gold);
+}

@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
-from .testing_agent import publish as publish_telemetry, close_stream
+from .testing_agent import publish as publish_telemetry
 
 def is_docker_available() -> bool:
     try:
@@ -22,11 +22,9 @@ def dispatch_sandbox(model_path: str, dataset_path: str, pipeline_path: str, vec
         print('\n[AegisML Security Gate] Docker sandbox is unavailable. Zero-Trust policy active: untrusted model/code will NOT be executed on host. Marking dynamic tests as skipped.')
         publish_telemetry(audit_id, {'event': 'sandbox_skipped', 'reason': 'docker_unavailable'})
         result = _build_fail_closed_skip_response(planned_tests=planned_tests, reason='Zero-Trust sandbox policy active: Docker daemon is unavailable. Untrusted model deserialization and pipeline execution were halted to protect the host environment from potential RCE or resource exhaustion.')
-        close_stream(audit_id)
         return result
 
     result = _run_in_docker(model_path=model_path, dataset_path=dataset_path, pipeline_path=pipeline_path, vectorizer_path=vectorizer_path, text_column=text_column, label_column=label_column, planned_tests=planned_tests, strategy_config=strategy_config, agent_1_results=agent_1_results, timeout_seconds=timeout_seconds, audit_id=audit_id, max_oom_retries=max_oom_retries if max_oom_retries is not None else int(os.getenv('AEGISML_MAX_OOM_RETRIES', '1')))
-    close_stream(audit_id)
     return result
 
 def _poll_container_stats(container_name: str, audit_id: Optional[str], stop_event: threading.Event, memory_limit_bytes: int, interval_seconds: float=1.5) -> None:
