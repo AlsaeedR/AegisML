@@ -42,8 +42,11 @@ def category_score(
         ):
             score = float(
                 finding.get(
-                    "final_risk_score",
-                    0,
+                    "risk_score",
+                    finding.get(
+                        "final_risk_score",
+                        0,
+                    ),
                 )
             )
 
@@ -188,8 +191,11 @@ def finding_card(
 
     final_severity = str(
         finding.get(
-            "final_severity",
-            "Low",
+            "severity",
+            finding.get(
+                "final_severity",
+                "Low",
+            ),
         )
     )
 
@@ -278,8 +284,11 @@ def finding_card(
 
     final_score = float(
         finding.get(
-            "final_risk_score",
-            0.0,
+            "risk_score",
+            finding.get(
+                "final_risk_score",
+                0.0,
+            ),
         )
     )
 
@@ -328,14 +337,21 @@ def finding_card(
     controls_meta_html = ""
     if mitigating_controls:
         controls_str = ", ".join(mitigating_controls)
-        if control_verdict == "verified_effective" or "mitigated" in correlation_lower:
+        if control_verdict == "verified_effective" or "mitigated" in correlation_lower or "defended" in correlation_lower:
             controls_meta_html = f"""
             <div class="finding-meta" style="color: #15803d;">
                 verified active controls:
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
-        elif control_verdict == "bypassed" or "hidden risk" in correlation_lower:
+        elif control_verdict == "partially_effective":
+            controls_meta_html = f"""
+            <div class="finding-meta" style="color: #0284c7;">
+                partially active controls (mitigated major failure):
+                <strong>{escape(controls_str)}</strong>
+            </div>
+            """
+        elif control_verdict == "bypassed" or ("hidden risk" in correlation_lower and final_severity.lower() in ["critical", "high"]):
             controls_meta_html = f"""
             <div class="finding-meta" style="color: #c2410c;">
                 bypassed controls (failed under penetration testing):
@@ -1472,7 +1488,7 @@ def render_interactive_pipeline_graph(
         if finding:
             title_parts.append(
                 "Risk: "
-                f"{finding.get('final_risk_score', finding.get('static_risk_score', 'N/A'))}"
+                f"{finding.get('risk_score', finding.get('final_risk_score', finding.get('static_risk_score', 'N/A')))}"
             )
 
         x_position, y_position = graph_positions.get(
@@ -1690,9 +1706,9 @@ def render_interactive_pipeline_graph(
                     )
 
                     risk_col2.metric(
-                        "Final risk",
+                        "Risk score",
                         (
-                            f"{float(finding.get('final_risk_score', 0.0)):.1f}/10"
+                            f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
                         ),
                     )
 
@@ -1993,8 +2009,8 @@ def render_report_signoff_gate(
                         "correlation_status",
                         "Unverified",
                     ),
-                    "Final risk": (
-                        f"{float(finding.get('final_risk_score', 0.0)):.1f}/10"
+                    "Risk score": (
+                        f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
                     ),
                 }
             )

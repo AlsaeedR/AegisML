@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ReportFinding(BaseModel):
@@ -79,12 +79,55 @@ class ReportFinding(BaseModel):
         le=10,
     )
 
-    final_risk_score: float = Field(
+    # Primary Authoritative Risk Assessment (NIST SP 800-30 Rev. 1)
+    risk_score: float = Field(
         ge=0,
         le=10,
+        description="Authoritative, empirical risk score reconciled from static and dynamic evidence.",
     )
 
-    final_severity: str
+    severity: str = Field(
+        description="Authoritative severity tier: Critical, High, Medium, or Low.",
+    )
+
+    final_risk_score: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=10,
+        description="Backward-compatible alias for risk_score.",
+    )
+
+    final_severity: Optional[str] = Field(
+        default=None,
+        description="Backward-compatible alias for severity.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_authoritative_and_legacy_scores(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            r_score = data.get("risk_score")
+            f_score = data.get("final_risk_score")
+            if r_score is None and f_score is not None:
+                data["risk_score"] = f_score
+            elif f_score is None and r_score is not None:
+                data["final_risk_score"] = r_score
+            elif r_score is None and f_score is None:
+                s_score = data.get("static_risk_score", 0.0)
+                data["risk_score"] = s_score
+                data["final_risk_score"] = s_score
+
+            r_sev = data.get("severity")
+            f_sev = data.get("final_severity")
+            if r_sev is None and f_sev is not None:
+                data["severity"] = f_sev
+            elif f_sev is None and r_sev is not None:
+                data["final_severity"] = r_sev
+            elif r_sev is None and f_sev is None:
+                s_sev = data.get("static_severity", "Low")
+                data["severity"] = s_sev
+                data["final_severity"] = s_sev
+        return data
 
     risk_rationale: str
 

@@ -423,15 +423,15 @@ def build_pdf_report(
 
         final_score = float(
             finding.get(
-                "final_risk_score",
-                0.0,
+                "risk_score",
+                finding.get("final_risk_score", 0.0),
             )
         )
 
         final_severity = str(
             finding.get(
-                "final_severity",
-                "Low",
+                "severity",
+                finding.get("final_severity", "Low"),
             )
         )
 

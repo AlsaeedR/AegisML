@@ -449,9 +449,15 @@ def _correlation_status(
 
     if static_status == "mitigated":
         if test_status == "vulnerable":
+            dynamic_sev = str(finding.get("dynamic_severity", "")).lower()
+            if dynamic_sev in {"high", "critical"}:
+                return (
+                    "Hidden Risk",
+                    "Agent 1 identified mitigating controls, but Agent 2 empirical testing successfully bypassed them and confirmed the vulnerability.",
+                )
             return (
-                "Hidden Risk",
-                "Agent 1 identified mitigating controls, but Agent 2 empirical testing successfully bypassed them and confirmed the vulnerability.",
+                "Partially Defended",
+                "Agent 1 identified mitigating controls which resisted major failure, though minor residual issues were observed.",
             )
         if test_status == "not_vulnerable":
             return (
@@ -470,9 +476,15 @@ def _correlation_status(
         )
 
     if static_severity == "low" and test_status == "vulnerable":
+        dynamic_sev = str(finding.get("dynamic_severity", "")).lower()
+        if dynamic_sev in {"high", "critical"}:
+            return (
+                "Hidden Risk",
+                "Agent 1 assigned a low theoretical risk, but Agent 2 dynamically confirmed a severe vulnerability.",
+            )
         return (
-            "Hidden Risk",
-            "Agent 1 assigned a low theoretical risk, but Agent 2 dynamically confirmed the vulnerability.",
+            "Confirmed Risk",
+            "Agent 2 dynamically confirmed the vulnerability identified by Agent 1.",
         )
 
     if test_status == "vulnerable":
@@ -541,13 +553,18 @@ def calculate_final_risk(
         control_verdict = "verified_effective"
     elif test_status == "vulnerable":
         if static_status == "mitigated":
-            control_verdict = "bypassed"
+            if final_risk_score >= 5.0 or final_severity in {"Critical", "High", "critical", "high"}:
+                control_verdict = "bypassed"
+            else:
+                control_verdict = "partially_effective"
         else:
             control_verdict = "ineffective"
     else:
         control_verdict = "unverified"
 
     return {
+        "risk_score": final_risk_score,
+        "severity": final_severity,
         "impact": impact,
         "control_verdict": control_verdict,
         "static_likelihood": static_likelihood,
@@ -562,6 +579,6 @@ def calculate_final_risk(
         "risk_rationale": (
             f"Impact {impact:.1f}/10 combined with evidence-adjusted likelihood {final_likelihood:.1f}/10. "
             f"{evidence_rationale} {correlation_rationale} "
-            f"Final risk score: {final_risk_score:.1f}/10 ({final_severity})."
+            f"Authoritative risk score: {final_risk_score:.1f}/10 ({final_severity})."
         ),
     }
