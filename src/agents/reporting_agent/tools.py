@@ -43,12 +43,36 @@ def _build_overall_risk(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
     ]
 
     if applicable_findings:
-        highest_finding = max(
-            applicable_findings,
-            key=lambda f: float(f.get("risk_score", f.get("final_risk_score", 0.0))),
+        risk_scores = [
+            max(
+                0.0,
+                min(
+                    10.0,
+                    float(
+                        finding.get(
+                            "risk_score",
+                            finding.get("final_risk_score", 0.0),
+                        )
+                    ),
+                ),
+            )
+            for finding in applicable_findings
+        ]
+        highest_score = max(risk_scores)
+        average_score = sum(risk_scores) / len(risk_scores)
+        # Keep the maximum finding dominant while accounting for the wider risk profile.
+        overall_score = round((highest_score * 0.7) + (average_score * 0.3), 1)
+        overall_severity = str(
+            max(
+                applicable_findings,
+                key=lambda finding: float(
+                    finding.get(
+                        "risk_score",
+                        finding.get("final_risk_score", 0.0),
+                    )
+                ),
+            ).get("severity", "Low")
         )
-        overall_score = float(highest_finding.get("risk_score", highest_finding.get("final_risk_score", 0.0)))
-        overall_severity = str(highest_finding.get("severity", highest_finding.get("final_severity", "Low")))
     else:
         overall_score = 0.0
         overall_severity = "Not Applicable"

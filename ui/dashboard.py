@@ -754,6 +754,10 @@ def render_dashboard(
                         {score}
                     </div>
 
+                    <div class="risk-label">
+                        Overall risk
+                    </div>
+
                     <div class="risk-caption">
                         / 100 · {escape(severity)}
                     </div>

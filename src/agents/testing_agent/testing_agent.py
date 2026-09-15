@@ -296,8 +296,25 @@ def node_reason_strategy(state: TestingAgentState) -> Dict[str, Any]:
             strategy_plan = AttackStrategyPlan.model_validate(strategy_plan)
 
         strategy_plan.strategy_provenance = "autonomous_cognitive"
+        not_applicable_tests = {
+            f"{str(finding.get('vulnerability_id', '')).upper()}_"
+            + {
+                "V1": "poisoning",
+                "V2": "preprocessing",
+                "V3": "validation",
+                "V4": "adversarial",
+            }.get(str(finding.get("vulnerability_id", "")).upper(), "")
+            for finding in vuln_findings
+            if str(finding.get("status", "")).lower() == "not_applicable"
+        }
         ordered_tests = [t for t in TEST_ORDER if t in strategy_plan.selected_tests]
-        strategy_plan.selected_tests = ordered_tests or list(TEST_ORDER)
+        strategy_plan.selected_tests = [
+            test for test in ordered_tests if test not in not_applicable_tests
+        ]
+        if not strategy_plan.selected_tests:
+            strategy_plan.selected_tests = [
+                test for test in TEST_ORDER if test not in not_applicable_tests
+            ]
 
         log.append(f"Cognitive strategy formulated (provenance: {strategy_plan.strategy_provenance}). Planned tests: {strategy_plan.selected_tests}")
         log.append(f"Strategy rationale: {strategy_plan.planning_rationale}")

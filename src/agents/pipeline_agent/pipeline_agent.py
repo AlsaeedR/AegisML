@@ -264,6 +264,17 @@ def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
             "status": "vulnerability_validation_failed",
         }
 
+    has_inference_surface = any(
+        str(node.get("type", "")).lower() == "inference"
+        or str(node.get("component_type", "")).lower() == "inference"
+        for node in pipeline_graph.get("nodes", [])
+    )
+    if not has_inference_surface:
+        for finding in validated_report.vulnerabilities:
+            if finding.vulnerability_id == "V4":
+                finding.status = "not_applicable"
+                finding.mitigating_controls = []
+
     return {
         "vulnerability_findings": validated_report.model_dump(),
         "validation_errors": None,
