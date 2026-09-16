@@ -36,6 +36,188 @@ from ui.dashboard import (
 API_URL = "http://127.0.0.1:8000"
 
 
+# ---------------------------------------------------------
+# Browser-persistent audit recovery
+# ---------------------------------------------------------
+
+def remember_audit_resume_state(
+    audit_id: str,
+    phase: str,
+) -> None:
+    """
+    Persist only the audit identifier and workflow phase in the URL.
+
+    The actual audit state remains in the backend persistent memory.
+    No model, dataset, report, or security evidence is stored in the URL.
+    """
+    if not audit_id:
+        return
+
+    st.query_params["audit_id"] = audit_id
+    st.query_params["audit_phase"] = phase
+
+
+def clear_audit_resume_state() -> None:
+    """Remove the browser-side pointer to a previous audit."""
+    for key in ("audit_id", "audit_phase"):
+        if key in st.query_params:
+            del st.query_params[key]
+
+
+def get_audit_resume_state() -> tuple[str | None, str | None]:
+    """Read the persistent audit pointer from the current page URL."""
+    audit_id = st.query_params.get("audit_id")
+    phase = st.query_params.get("audit_phase")
+
+    if isinstance(audit_id, list):
+        audit_id = audit_id[0] if audit_id else None
+
+    if isinstance(phase, list):
+        phase = phase[0] if phase else None
+
+    return audit_id, phase
+
+
+def is_final_audit_payload(
+    payload: Dict[str, Any],
+) -> bool:
+    """
+    Only a completed correlated report may be rendered as final results.
+
+    Partial/interrupted backend responses must never reach the dashboard.
+    """
+    if not isinstance(payload, dict):
+        return False
+
+    if payload.get("status") != "awaiting_gate_2":
+        return False
+
+    report = payload.get("report")
+
+    if not isinstance(report, dict) or not report:
+        return False
+
+    if not isinstance(report.get("findings"), list):
+        return False
+
+    if not isinstance(report.get("overall_risk"), dict):
+        return False
+
+    return True
+
+
+def get_saved_audit_state(
+    audit_id: str,
+) -> requests.Response:
+    """Read the backend checkpoint without executing any agent."""
+    return requests.get(
+        f"{API_URL}/audit/{audit_id}",
+        timeout=10,
+    )
+
+
+def resume_saved_audit_once(
+    audit_id: str,
+    progress_placeholder: Any,
+) -> requests.Response:
+    """
+    Resume one persisted audit exactly once.
+
+    The backend execution lock prevents duplicate execution.
+    Partial results are never treated as final.
+    """
+    state_response = requests.get(
+        f"{API_URL}/audit/{audit_id}",
+        timeout=10,
+    )
+
+    if state_response.status_code != 200:
+        return state_response
+
+    state_payload = state_response.json()
+
+    if is_final_audit_payload(
+        state_payload
+    ):
+        return state_response
+
+    if state_payload.get(
+        "execution_active",
+        False,
+    ):
+        response = requests.Response()
+        response.status_code = 409
+        response._content = (
+            b'{"detail":"This audit is already executing. '
+            b'Wait for it to finish, then press Resume audit again."}'
+        )
+        response.headers["Content-Type"] = "application/json"
+        return response
+
+    return run_approved_audit_with_progress(
+        audit_id,
+        progress_placeholder,
+    )
+
+
+def restore_saved_report(
+    audit_id: str,
+    max_wait_seconds: int = 120,
+) -> requests.Response:
+    """
+    Restore an already-completed audit result.
+
+    This endpoint is read-only: it never re-runs Agent 1, Agent 2,
+    Agent 3, or any dynamic security test. If the API is temporarily
+    unavailable or restarting, retry until it becomes reachable.
+    """
+    deadline = time.time() + max_wait_seconds
+    last_error = None
+
+    while time.time() < deadline:
+        try:
+            response = requests.get(
+                f"{API_URL}/audit/{audit_id}",
+                timeout=5,
+            )
+
+            if response.status_code in {
+                200,
+                404,
+            }:
+                return response
+
+            last_error = (
+                f"HTTP {response.status_code}: "
+                f"{response.text}"
+            )
+
+        except requests.exceptions.RequestException as exc:
+            last_error = str(exc)
+
+        time.sleep(2)
+
+    raise requests.exceptions.Timeout(
+        "The API did not become available in time. "
+        f"Last detail: {last_error or 'service unavailable'}"
+    )
+
+
+def resume_previous_audit(
+    audit_id: str,
+    progress_placeholder: Any,
+) -> requests.Response:
+    """
+    Resume an interrupted audit that has not produced a final report yet.
+
+    The backend uses persistent checkpoints to skip completed steps.
+    """
+    return run_approved_audit_with_progress(
+        audit_id,
+        progress_placeholder,
+    )
+
+
 def clean_executive_summary(summary: Any) -> str:
     """Keep the executive summary concise without repeating the V4 percentage."""
     text = str(summary or "")
@@ -69,26 +251,33 @@ def render_agent_progress(
     for agent, step, default_status in stages:
         event = latest_by_step.get(step, {})
         event_type = event.get("event")
-        if event_type != "agent_step_started":
-            continue
 
         if event_type == "agent_step_started":
             status = "Running"
             marker = "running"
         elif event_type == "agent_step_finished":
-            status = str(event.get("status", "Complete")).replace("_", " ").title()
+            status = str(
+                event.get(
+                    "status",
+                    "Complete",
+                )
+            ).replace(
+                "_",
+                " ",
+            ).title()
             marker = "complete"
         elif default_status == "Complete":
-            status = default_status
-            marker = "complete"
-        elif step == "Approved attack strategy" and step in latest_by_step:
-            status = "Approved"
+            status = "Complete"
             marker = "complete"
         else:
             status = default_status
             marker = "waiting"
 
-        message = event.get("message", "")
+        message = event.get(
+            "message",
+            "",
+        )
+
         rows.append(
             f"""
             <div class="agent-progress-row">
@@ -1090,6 +1279,16 @@ if "audit_id" not in st.session_state:
 if "report_signed_off" not in st.session_state:
     st.session_state.report_signed_off = False
 
+recoverable_audit_id, recoverable_audit_phase = get_audit_resume_state()
+
+# Restore the audit identifier after a Streamlit/browser rerun.
+# The security state itself is restored by FastAPI from persistent memory.
+if (
+    st.session_state.audit_id is None
+    and recoverable_audit_id
+):
+    st.session_state.audit_id = recoverable_audit_id
+
 
 # =========================================================
 # GATE 1 - HUMAN ATTACK STRATEGY APPROVAL
@@ -1116,27 +1315,73 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
     render_interactive_pipeline_graph(st.session_state.audit_plan)
 
     if render_attack_strategy_gate(st.session_state.audit_plan):
+        remember_audit_resume_state(
+            st.session_state.audit_id,
+            "executing",
+        )
+
+        progress_placeholder = st.empty()
+
         try:
-            progress_placeholder = st.empty()
-            with st.spinner("Running approved dynamic tests and evidence correlation..."):
+            with st.spinner(
+                "Running approved dynamic tests and evidence correlation..."
+            ):
                 response = run_approved_audit_with_progress(
                     st.session_state.audit_id,
                     progress_placeholder,
                 )
 
-            if response.status_code != 200:
-                try:
-                    detail = response.json().get("detail", "Audit execution failed.")
-                except Exception:
-                    detail = response.text
-                st.error(detail)
-            else:
-                st.session_state.audit_result = response.json()
+            if response.status_code == 200:
+                payload = response.json()
+
+                if is_final_audit_payload(
+                    payload
+                ):
+                    st.session_state.audit_result = payload
+                    st.session_state.audit_plan = None
+                    st.session_state.report_signed_off = False
+
+                    remember_audit_resume_state(
+                        st.session_state.audit_id,
+                        "report",
+                    )
+
+                    st.rerun()
+
+                else:
+                    st.warning(
+                        "The audit stopped before the final report was ready. "
+                        "No partial results were published. "
+                        "Your checkpoint is saved."
+                    )
+                    st.session_state.audit_plan = None
+                    st.rerun()
+
+            elif response.status_code == 409:
+                st.info(
+                    "This audit is already running. "
+                    "Wait for it to finish, then use Resume audit."
+                )
                 st.session_state.audit_plan = None
-                st.session_state.report_signed_off = False
                 st.rerun()
-        except requests.exceptions.RequestException as exc:
-            st.error(f"API error: {exc}")
+
+            else:
+                st.warning(
+                    "The audit was interrupted before completion. "
+                    "No partial results were published. "
+                    "Your checkpoint is saved."
+                )
+                st.session_state.audit_plan = None
+                st.rerun()
+
+        except requests.exceptions.RequestException:
+            st.warning(
+                "The API connection was interrupted. "
+                "No partial results were published. "
+                "Your checkpoint is saved."
+            )
+            st.session_state.audit_plan = None
+            st.rerun()
 
     st.stop()
 
@@ -1146,6 +1391,146 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
 # =========================================================
 
 if st.session_state.audit_result is None:
+
+    # -----------------------------------------------------
+    # Resume an interrupted approved audit
+    # -----------------------------------------------------
+
+    if (
+        st.session_state.audit_plan is None
+        and recoverable_audit_id
+        and recoverable_audit_phase in {"executing", "report"}
+    ):
+        with st.container(border=True):
+            st.markdown("### Previous audit detected")
+            if recoverable_audit_phase == "report":
+                st.write(
+                    "AegisML found a completed saved audit. Restore the "
+                    "persisted report without re-running any security test."
+                )
+            else:
+                st.write(
+                    "AegisML found a saved audit session. "
+                    "Resume it safely from the latest completed checkpoint."
+                )
+
+            resume_info, resume_action = st.columns(
+                [4, 1.35],
+                gap="medium",
+            )
+
+            with resume_info:
+                st.caption(
+                    f"Audit ID: {recoverable_audit_id[:12]}… · "
+                    f"Saved phase: {recoverable_audit_phase}"
+                )
+
+            with resume_action:
+                action_label = (
+                    "Restore report"
+                    if recoverable_audit_phase == "report"
+                    else "Resume audit"
+                )
+
+                if st.button(
+                    action_label,
+                    type="primary",
+                    use_container_width=True,
+                    key="resume_previous_audit",
+                ):
+                    try:
+                        st.session_state.audit_id = recoverable_audit_id
+
+                        if recoverable_audit_phase == "report":
+                            response = restore_saved_report(
+                                recoverable_audit_id
+                            )
+                        else:
+                            progress_placeholder = st.empty()
+
+                            with st.spinner(
+                                "Resuming from the latest saved checkpoint..."
+                            ):
+                                response = resume_saved_audit_once(
+                                    recoverable_audit_id,
+                                    progress_placeholder,
+                                )
+
+                        if response.status_code == 200:
+                            payload = response.json()
+
+                            if is_final_audit_payload(
+                                payload
+                            ):
+                                st.session_state.audit_result = payload
+                                st.session_state.audit_plan = None
+                                st.session_state.report_signed_off = False
+
+                                remember_audit_resume_state(
+                                    recoverable_audit_id,
+                                    "report",
+                                )
+
+                                st.rerun()
+
+                            else:
+                                # A stale "report" URL can exist if shutdown
+                                # happened before the report was fully persisted.
+                                remember_audit_resume_state(
+                                    recoverable_audit_id,
+                                    "executing",
+                                )
+                                st.info(
+                                    "The audit is saved but not complete yet. "
+                                    "Press Resume audit to continue from the "
+                                    "latest checkpoint."
+                                )
+
+                        elif response.status_code == 409:
+                            st.info(
+                                "This audit is already running. "
+                                "Wait for it to finish, then press Resume audit again."
+                            )
+
+                        else:
+                            try:
+                                detail = response.json().get(
+                                    "detail",
+                                    "Could not restore the saved audit.",
+                                )
+                            except Exception:
+                                detail = response.text
+
+                            st.error(detail)
+
+                    except requests.exceptions.RequestException:
+                        st.warning(
+                            "The API is unavailable right now. "
+                            "Your checkpoint is still saved. "
+                            "Start the API, then press Resume audit again."
+                        )
+
+            if st.button(
+                "Discard saved audit",
+                use_container_width=False,
+                key="discard_saved_audit",
+            ):
+                clear_audit_resume_state()
+                st.session_state.audit_id = None
+                st.rerun()
+
+        st.write("")
+
+    elif (
+        st.session_state.audit_plan is None
+        and recoverable_audit_id
+        and recoverable_audit_phase == "gate1"
+    ):
+        st.info(
+            "A previous audit reached Gate 1 but was not approved yet. "
+            "For safety, AegisML will not execute dynamic attacks automatically. "
+            "Start a new scan unless the backend Gate 1 recovery view is enabled."
+        )
 
     # -----------------------------------------------------
     # Upload screen header
@@ -1375,6 +1760,12 @@ if st.session_state.audit_result is None:
                     st.session_state.audit_plan = plan_payload
                     st.session_state.audit_id = plan_payload.get("audit_id")
                     st.session_state.audit_result = None
+
+                    remember_audit_resume_state(
+                        st.session_state.audit_id,
+                        "gate1",
+                    )
+
                     st.rerun()
 
             except requests.exceptions.ConnectionError:
@@ -1608,6 +1999,7 @@ else:
                 st.session_state.audit_id = None
                 st.session_state.report_signed_off = False
                 st.session_state.active_report_section = "Pipeline & findings"
+                clear_audit_resume_state()
                 st.rerun()
 
     else:
@@ -1652,6 +2044,7 @@ else:
                 st.session_state.audit_id = None
                 st.session_state.report_signed_off = False
                 st.session_state.active_report_section = "Pipeline & findings"
+                clear_audit_resume_state()
                 st.rerun()
 
         with download_col:
