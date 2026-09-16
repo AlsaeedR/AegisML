@@ -1,9 +1,11 @@
 import json
+import time
 from typing import Any, Dict, List, Literal, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.core.llm import get_llm, is_llm_available
+from src.core.audit_memory import get_step_checkpoint, save_step_checkpoint
 from .schemas import ReportingAgentState
 from .tools import (
     score_finding_tool,
@@ -16,17 +18,56 @@ from .tools import (
 
 def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
     """Combines Agent 1 static findings with Agent 2 dynamic test telemetry."""
+    audit_id = state.get("audit_id")
+    t0 = time.time()
     agent_1 = state.get("agent_1_results") or {}
     agent_2 = state.get("agent_2_results") or {}
 
-    static_findings = agent_1.get("vulnerability_findings", {}).get("vulnerabilities", [])
+    vuln_obj = agent_1.get("vulnerability_findings") or {}
+    if isinstance(vuln_obj, list):
+        static_findings = vuln_obj
+    elif isinstance(vuln_obj, dict):
+        static_findings = vuln_obj.get("vulnerabilities", [])
+    else:
+        static_findings = []
+
     dynamic_results = agent_2.get("structured_test_results", {}).get("results", [])
 
-    dynamic_by_id = {
-        result.get("vulnerability_id"): result
-        for result in dynamic_results
-        if result.get("vulnerability_id")
+    dynamic_by_id: Dict[str, Any] = {}
+    for result in dynamic_results:
+        vid = str(result.get("vulnerability_id", "")).strip().upper()
+        if vid:
+            dynamic_by_id[vid] = result
+            if len(vid) >= 2:
+                dynamic_by_id[vid[:2]] = result
+
+    # Also check direct evidence fields on agent_2 (e.g. poisoning_evidence, etc.)
+    evidence_field_map = {
+        "V1": "poisoning_evidence",
+        "V2": "preprocessing_evidence",
+        "V3": "validation_evidence",
+        "V4": "adversarial_evidence",
     }
+    for short_vid, field_name in evidence_field_map.items():
+        if short_vid not in dynamic_by_id:
+            direct_ev = agent_2.get(field_name)
+            if isinstance(direct_ev, dict) and direct_ev.get("status"):
+                dynamic_by_id[short_vid] = direct_ev
+
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "correlate_findings")
+        if cached is not None:
+            cached_findings = cached.get("correlated_findings", [])
+            cached_has_dynamic = any(
+                f.get("test_status") in ("vulnerable", "not_vulnerable")
+                for f in cached_findings
+            )
+            current_has_dynamic = any(
+                r.get("status") in ("vulnerable", "not_vulnerable")
+                for r in dynamic_by_id.values()
+            )
+            if cached_has_dynamic == current_has_dynamic:
+                return cached
 
     pipeline_graph = agent_1.get("pipeline_graph")
     threat_model = agent_1.get("threat_model")
@@ -35,14 +76,18 @@ def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
 
     for static_finding in static_findings:
         vulnerability_id = static_finding.get("vulnerability_id")
+        short_id = str(vulnerability_id)[:2].upper() if vulnerability_id else ""
         dynamic_result = dynamic_by_id.get(
             vulnerability_id,
-            {
-                "vulnerability_id": vulnerability_id,
-                "status": "not_tested",
-                "severity": None,
-                "evidence": {"reason": "No matching Agent 2 result was available."},
-            },
+            dynamic_by_id.get(
+                short_id,
+                {
+                    "vulnerability_id": vulnerability_id,
+                    "status": "not_tested",
+                    "severity": None,
+                    "evidence": {"reason": "No matching Agent 2 result was available."},
+                },
+            ),
         )
 
         correlated_finding = {
@@ -72,7 +117,7 @@ def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
         "and applied deterministic NIST AI 100-2e2025 risk scoring."
     )
 
-    return {
+    res = {
         "correlated_findings": correlated_findings,
         "retry_count": 0,
         "max_retries": 3,
@@ -80,10 +125,29 @@ def node_correlate_findings(state: ReportingAgentState) -> Dict[str, Any]:
         "execution_log": log,
         "status": "risk_scoring_completed",
     }
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 3", "correlate_findings", res, duration_seconds=round(time.time() - t0, 3))
+    return res
 
 
 def node_synthesize_audit_report(state: ReportingAgentState) -> Dict[str, Any]:
     """Autonomous Synthesis Node — Active Tool-Calling ReAct Loop."""
+    audit_id = state.get("audit_id")
+    if audit_id and not state.get("validation_errors"):
+        cached = get_step_checkpoint(audit_id, "synthesize_audit_report")
+        if cached is not None:
+            cached_has_dynamic = any(
+                f.get("test_status") in ("vulnerable", "not_vulnerable")
+                for f in cached.get("final_report", {}).get("findings", [])
+            )
+            current_has_dynamic = any(
+                f.get("test_status") in ("vulnerable", "not_vulnerable")
+                for f in state.get("correlated_findings", [])
+            )
+            if cached_has_dynamic == current_has_dynamic:
+                return cached
+
+    t0 = time.time()
     log = list(state.get("execution_log", []))
     correlated_findings = state.get("correlated_findings", [])
     agent_1 = state.get("agent_1_results") or {}
@@ -157,11 +221,14 @@ def node_synthesize_audit_report(state: ReportingAgentState) -> Dict[str, Any]:
     )
 
     log.append("Synthesized draft security audit report.")
-    return {
+    res = {
         "final_report": raw_report,
         "execution_log": log,
         "status": "report_synthesized",
     }
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 3", "synthesize_audit_report", res, duration_seconds=round(time.time() - t0, 3))
+    return res
 
 
 def node_validate_audit_report(state: ReportingAgentState) -> Dict[str, Any]:
@@ -188,13 +255,17 @@ def node_validate_audit_report(state: ReportingAgentState) -> Dict[str, Any]:
             "status": "audit_report_validation_failed",
         }
 
-    return {
+    res = {
         "final_report": report_dict,
         "overall_risk": report_dict.get("overall_risk"),
         "validation_errors": None,
         "retry_count": 0,
         "status": "audit_report_validated",
     }
+    audit_id = state.get("audit_id")
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 3", "validate_audit_report", res)
+    return res
 
 
 def route_after_report_validation(
@@ -217,13 +288,17 @@ def node_finalize_report(state: ReportingAgentState) -> Dict[str, Any]:
     log = list(state.get("execution_log", []))
     log.append("Completed and sealed final AegisML security audit report.")
 
-    return {
+    res = {
         "overall_risk": report.get("overall_risk"),
         "final_report": report,
         "validation_errors": None,
         "execution_log": log,
         "status": "completed",
     }
+    audit_id = state.get("audit_id")
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 3", "finalize_report", res)
+    return res
 
 
 def build_reporting_agent_graph():
@@ -256,6 +331,7 @@ def build_reporting_agent_graph():
 def run_reporting_agent(
     agent_1_results: Dict[str, Any],
     agent_2_results: Dict[str, Any],
+    audit_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute the Reporting Agent."""
     app = build_reporting_agent_graph()
@@ -266,6 +342,7 @@ def run_reporting_agent(
         "correlated_findings": [],
         "execution_log": [],
         "status": "initialized",
+        "audit_id": audit_id,
     }
 
     return app.invoke(initial_state)

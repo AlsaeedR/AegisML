@@ -33,6 +33,14 @@ from .tools import (
     make_cognitive_planning_tools,
     make_forensic_diagnostic_tools,
 )
+from src.core.audit_memory import (
+    get_step_checkpoint,
+    save_step_checkpoint,
+    get_subtest_checkpoint,
+    save_subtest_checkpoint,
+    get_all_subtests,
+    verify_artifact_integrity,
+)
 
 
 # =====================================================================
@@ -167,7 +175,14 @@ def traced_node(node_name: str) -> Callable:
 # LangGraph Workflow Nodes
 # =====================================================================
 
-def node_prepare_metadata(state: TestingAgentState) -> Dict[str, Any]:
+def node_prepare_metadata(state: TestingAgentState, audit_id: Optional[str] = None) -> Dict[str, Any]:
+    audit_id = audit_id or state.get("audit_id")
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "prepare_metadata")
+        if cached is not None:
+            return cached
+
+    t0 = time.time()
     dataset_path = state.get("dataset_path", "")
     text_column = state.get("text_column")
     label_column = state.get("label_column")
@@ -178,10 +193,26 @@ def node_prepare_metadata(state: TestingAgentState) -> Dict[str, Any]:
     })
     log = list(state.get("execution_plan_log") or [])
     log.append(f"Host-side safe metadata inspection completed for: {os.path.basename(dataset_path)}")
-    return {"dataset_profile": profile, "execution_plan_log": log}
+    res = {"dataset_profile": profile, "execution_plan_log": log}
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 2", "prepare_metadata", res, duration_seconds=round(time.time() - t0, 3))
+    return res
 
 
-def node_reason_strategy(state: TestingAgentState) -> Dict[str, Any]:
+def node_reason_strategy(state: TestingAgentState, audit_id: Optional[str] = None) -> Dict[str, Any]:
+    audit_id = audit_id or state.get("audit_id")
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "reason_strategy")
+        if cached is not None:
+            publish(audit_id, {
+                "event": "step_resumed_from_checkpoint",
+                "agent": "Agent 2",
+                "step": "Attack strategy formulation",
+                "message": "Strategy plan loaded from checkpoint.",
+            })
+            return cached
+
+    t0 = time.time()
     log = list(state.get("execution_plan_log") or [])
     agent_1 = state.get("agent_1_results") or {}
     dataset_profile = state.get("dataset_profile") or {}
@@ -319,36 +350,104 @@ def node_reason_strategy(state: TestingAgentState) -> Dict[str, Any]:
         log.append(f"Cognitive strategy formulated (provenance: {strategy_plan.strategy_provenance}). Planned tests: {strategy_plan.selected_tests}")
         log.append(f"Strategy rationale: {strategy_plan.planning_rationale}")
 
-        return {
+        res = {
             "attack_strategy_plan": strategy_plan.model_dump(),
             "planned_tests": strategy_plan.selected_tests,
             "execution_plan_log": log,
         }
+        if audit_id:
+            save_step_checkpoint(audit_id, "Agent 2", "reason_strategy", res, duration_seconds=round(time.time() - t0, 3))
+        return res
 
     except Exception as e:
         fallback = get_fallback(f"Reasoning loop encountered exception: {str(e)}")
         log.append(f"LLM strategy formulation error ({str(e)}). Applied baseline strategy (provenance: {fallback.strategy_provenance}).")
-        return {
+        res = {
             "attack_strategy_plan": fallback.model_dump(),
             "planned_tests": fallback.selected_tests,
             "execution_plan_log": log,
         }
+        if audit_id:
+            save_step_checkpoint(audit_id, "Agent 2", "reason_strategy", res, duration_seconds=round(time.time() - t0, 3))
+        return res
 
 
 def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
     from .sandbox_runner import dispatch_sandbox
+    from src.core.audit_memory import (
+        get_all_subtests,
+        save_subtest_checkpoint,
+        sync_subtests_for_audit,
+        invalidate_post_gate1_steps,
+    )
 
     log = list(state.get("execution_plan_log") or [])
     planned_tests = state.get("planned_tests", TEST_ORDER)
     strategy_config = state.get("attack_strategy_plan", {})
     audit_id = state.get("audit_id")
+    t0 = time.time()
+
+    # Sync and retrieve all previously completed dynamic sub-tests for this audit / pipeline
+    cached_subtests: Dict[str, Dict[str, Any]] = {}
+    if audit_id:
+        try:
+            synced = sync_subtests_for_audit(
+                audit_id,
+                code=state.get("pipeline_source"),
+                model_path=state.get("model_path"),
+                dataset_path=state.get("dataset_path"),
+            )
+            cached_subtests = dict(synced)
+        except Exception:
+            cached_subtests = get_all_subtests(audit_id)
+    
+    # Filter to only genuine completed dynamic tests (never skipped/unverified)
+    valid_cached = {}
+    for tid, ev in cached_subtests.items():
+        if isinstance(ev, dict):
+            st = str(ev.get("status", "")).lower()
+            ev_st = str(ev.get("evidence", {}).get("status", "")).lower()
+            if st not in ("skipped", "unverified", "skipped_zero_trust", "error") and ev_st != "skipped":
+                valid_cached[tid] = ev
+    cached_subtests = valid_cached
+
+    subtest_key_map = {
+        "V1_poisoning": "poisoning_evidence",
+        "V4_adversarial": "adversarial_evidence",
+        "V2_preprocessing": "preprocessing_evidence",
+        "V3_validation": "validation_evidence",
+    }
+
+    # Identify tests needing execution
+    needed_tests = [t for t in planned_tests if t not in cached_subtests]
+
+    if audit_id and not needed_tests:
+        log.append(f"All planned dynamic tests ({planned_tests}) restored from sub-test checkpoints. Skipping sandbox re-execution.")
+        publish(audit_id, {
+            "event": "agent_step_finished",
+            "agent": "Agent 2",
+            "step": "Dynamic security testing",
+            "status": "executed",
+            "message": f"Dynamic tests restored from memory: {', '.join(planned_tests)}",
+        })
+        invalidate_post_gate1_steps(audit_id)
+        return {
+            "sandbox_status": "executed",
+            "sandbox_telemetry": {"duration_seconds": 0.0, "cached": True},
+            "poisoning_evidence": cached_subtests.get("V1_poisoning", {}),
+            "adversarial_evidence": cached_subtests.get("V4_adversarial", {}),
+            "preprocessing_evidence": cached_subtests.get("V2_preprocessing", {}),
+            "validation_evidence": cached_subtests.get("V3_validation", {}),
+            "execution_plan_log": log,
+        }
+
     publish(audit_id, {
         "event": "agent_step_started",
         "agent": "Agent 2",
         "step": "Dynamic security testing",
-        "message": f"Running approved tests: {', '.join(planned_tests)}",
+        "message": f"Running approved tests: {', '.join(needed_tests)}" + (f" (retained {len(cached_subtests)} from memory)" if cached_subtests else ""),
     })
-    log.append(f"Dispatching dynamic tests to sandbox orchestrator: {planned_tests}")
+    log.append(f"Dispatching dynamic tests to sandbox orchestrator: {needed_tests}" + (f" (retaining {list(cached_subtests.keys())} from memory)" if cached_subtests else ""))
 
     resolved_text_col = (
         state.get("text_column")
@@ -368,13 +467,30 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
         vectorizer_path=state.get("vectorizer_path"),
         text_column=resolved_text_col,
         label_column=resolved_label_col,
-        planned_tests=planned_tests,
+        planned_tests=needed_tests,
         strategy_config=strategy_config,
         agent_1_results=state.get("agent_1_results"),
         audit_id=audit_id,
     )
 
     log.extend(sandbox_result.get("execution_log", []))
+
+    # Persist newly executed subtests
+    if audit_id and sandbox_result.get("sandbox_status") == "executed":
+        for test_id, ev_key in subtest_key_map.items():
+            ev_data = sandbox_result.get(ev_key)
+            if test_id in needed_tests and ev_data:
+                save_subtest_checkpoint(audit_id, test_id, ev_data)
+
+    if audit_id:
+        invalidate_post_gate1_steps(audit_id)
+
+    # Merge cached and freshly executed evidence
+    final_poisoning = sandbox_result.get("poisoning_evidence") or cached_subtests.get("V1_poisoning", {})
+    final_adversarial = sandbox_result.get("adversarial_evidence") or cached_subtests.get("V4_adversarial", {})
+    final_preprocessing = sandbox_result.get("preprocessing_evidence") or cached_subtests.get("V2_preprocessing", {})
+    final_validation = sandbox_result.get("validation_evidence") or cached_subtests.get("V3_validation", {})
+
     publish(audit_id, {
         "event": "agent_step_finished",
         "agent": "Agent 2",
@@ -382,18 +498,34 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
         "status": sandbox_result.get("sandbox_status", "unknown"),
         "message": "Dynamic tests completed." if sandbox_result.get("sandbox_status") == "executed" else "Dynamic tests finished with a guarded status.",
     })
-    return {
+    res = {
         "sandbox_status": sandbox_result.get("sandbox_status", "unknown"),
         "sandbox_telemetry": sandbox_result.get("telemetry", {}),
-        "poisoning_evidence": sandbox_result.get("poisoning_evidence", {}),
-        "adversarial_evidence": sandbox_result.get("adversarial_evidence", {}),
-        "preprocessing_evidence": sandbox_result.get("preprocessing_evidence", {}),
-        "validation_evidence": sandbox_result.get("validation_evidence", {}),
+        "poisoning_evidence": final_poisoning,
+        "adversarial_evidence": final_adversarial,
+        "preprocessing_evidence": final_preprocessing,
+        "validation_evidence": final_validation,
         "execution_plan_log": log,
     }
+    if audit_id and sandbox_result.get("sandbox_status") == "executed":
+        save_step_checkpoint(audit_id, "Agent 2", "execute_sandbox", res, duration_seconds=round(time.time() - t0, 3))
+    return res
 
 
 def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
+    audit_id = state.get("audit_id")
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "forensic_diagnosis")
+        if cached is not None:
+            publish(audit_id, {
+                "event": "step_resumed_from_checkpoint",
+                "agent": "Agent 2",
+                "step": "Forensic diagnosis",
+                "message": "Forensic diagnosis loaded from checkpoint.",
+            })
+            return cached
+
+    t0 = time.time()
     log = list(state.get("execution_plan_log") or [])
     sandbox_status = state.get("sandbox_status", "")
     agent_1 = state.get("agent_1_results") or {}
@@ -507,7 +639,10 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
             "status": "completed",
             "message": "Forensic diagnosis completed.",
         })
-        return {"forensic_analysis": report.model_dump(), "execution_plan_log": log}
+        res = {"forensic_analysis": report.model_dump(), "execution_plan_log": log}
+        if audit_id:
+            save_step_checkpoint(audit_id, "Agent 2", "forensic_diagnosis", res, duration_seconds=round(time.time() - t0, 3))
+        return res
 
     except Exception as e:
         log.append(f"LLM forensic diagnosis encountered error ({str(e)}). Used deterministic fallback.")
@@ -519,10 +654,20 @@ def node_forensic_diagnosis(state: TestingAgentState) -> Dict[str, Any]:
             "status": "fallback",
             "message": "Forensic diagnosis used a deterministic fallback.",
         })
-        return {"forensic_analysis": fallback.model_dump(), "execution_plan_log": log}
+        res = {"forensic_analysis": fallback.model_dump(), "execution_plan_log": log}
+        if audit_id:
+            save_step_checkpoint(audit_id, "Agent 2", "forensic_diagnosis", res, duration_seconds=round(time.time() - t0, 3))
+        return res
 
 
 def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
+    audit_id = state.get("audit_id")
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "aggregate_results")
+        if cached is not None:
+            return cached
+
+    t0 = time.time()
     results: List[Dict[str, Any]] = []
     verifications: List[Dict[str, Any]] = []
     agent_1 = state.get("agent_1_results")
@@ -583,7 +728,7 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
     result_order = {t.split("_")[0]: i for i, t in enumerate(TEST_ORDER)}
     results.sort(key=lambda r: result_order.get(r.get("vulnerability_id", ""), 99))
 
-    return {
+    res = {
         "structured_test_results": {
             "results": results,
             "hypothesis_verifications": verifications,
@@ -596,6 +741,9 @@ def node_aggregate_results(state: TestingAgentState) -> Dict[str, Any]:
         "hypothesis_verifications": verifications,
         "status": "completed",
     }
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 2", "aggregate_results", res, duration_seconds=round(time.time() - t0, 3))
+    return res
 
 
 def _verification_from_status(
@@ -717,6 +865,7 @@ def run_testing_agent(
     test_targets: Optional[List[str]] = None,
     pipeline_path: Optional[str] = None,
     audit_id: Optional[str] = None,
+    force_resume: bool = False,
 ) -> Dict[str, Any]:
     """
     Executes Agent 2 (Vulnerability Testing Agent).
@@ -725,6 +874,14 @@ def run_testing_agent(
     autonomously plans and dispatches empirical security tests, and cross-verifies
     empirical measurements against upstream hypotheses.
     """
+    if audit_id:
+        verify_artifact_integrity(
+            audit_id,
+            model_path=model_path,
+            dataset_path=dataset_path,
+            force=force_resume,
+        )
+
     app = build_testing_agent_graph()
 
     initial_state: TestingAgentState = {

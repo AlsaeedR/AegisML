@@ -239,3 +239,4 @@ class ReportingAgentState(TypedDict, total=False):
     validation_errors: Optional[str]
     retry_count: int
     max_retries: int
+    audit_id: Optional[str]

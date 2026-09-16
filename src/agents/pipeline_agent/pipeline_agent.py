@@ -1,9 +1,16 @@
 import json
+import time
 from typing import Any, Dict, List, Literal, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from src.core.llm import get_llm, is_llm_available
+from src.core.audit_memory import (
+    get_step_checkpoint,
+    save_step_checkpoint,
+    register_audit_artifacts,
+    verify_artifact_integrity,
+)
 from .schemas import PipelineAgentState
 from .tools import (
     run_ast_extractor,
@@ -20,11 +27,18 @@ from .tools import (
 
 def node_extract_pipeline(state: PipelineAgentState) -> Dict[str, Any]:
     """Perception node: uses AST and NetworkX tools to construct the structural graph."""
+    audit_id = state.get("audit_id")
+    if audit_id:
+        cached = get_step_checkpoint(audit_id, "extract_pipeline")
+        if cached is not None:
+            return cached
+
+    t0 = time.time()
     code = state["code"]
     pipeline_graph = run_ast_extractor(code)
     networkx_graph, topology = run_networkx_builder(pipeline_graph)
 
-    return {
+    result = {
         "pipeline_graph": pipeline_graph,
         "networkx_graph": networkx_graph,
         "graph_topology": topology,
@@ -33,10 +47,20 @@ def node_extract_pipeline(state: PipelineAgentState) -> Dict[str, Any]:
         "validation_errors": None,
         "status": "pipeline_extracted",
     }
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "extract_pipeline", result, duration_seconds=round(time.time() - t0, 3))
+    return result
 
 
 def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
     """Reasoning node: ReAct exploration tool calling, then threat model formulation."""
+    audit_id = state.get("audit_id")
+    if audit_id and not state.get("validation_errors"):
+        cached = get_step_checkpoint(audit_id, "reason_threat_model")
+        if cached is not None:
+            return cached
+
+    t0 = time.time()
     code = state["code"]
     pipeline_graph = state["pipeline_graph"]
     networkx_graph = state.get("networkx_graph")
@@ -111,7 +135,10 @@ def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
         tool_context=tool_context or None,
     )
 
-    return {"threat_model": threat_model_raw}
+    result = {"threat_model": threat_model_raw}
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "reason_threat_model", result, duration_seconds=round(time.time() - t0, 3))
+    return result
 
 
 def node_validate_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
@@ -137,12 +164,16 @@ def node_validate_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
             "status": "threat_model_validation_failed",
         }
 
-    return {
+    result = {
         "threat_model": validated_model.model_dump(),
         "validation_errors": None,
         "retry_count": 0,
         "status": "threat_model_validated",
     }
+    audit_id = state.get("audit_id")
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "validate_threat_model", result)
+    return result
 
 
 def route_after_threat_model_validation(
@@ -161,6 +192,13 @@ def route_after_threat_model_validation(
 
 def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
     """Reasoning node: actively investigates pipeline controls before formulating findings."""
+    audit_id = state.get("audit_id")
+    if audit_id and not state.get("validation_errors"):
+        cached = get_step_checkpoint(audit_id, "reason_vulnerabilities")
+        if cached is not None:
+            return cached
+
+    t0 = time.time()
     code = state["code"]
     pipeline_graph = state["pipeline_graph"]
     networkx_graph = state.get("networkx_graph")
@@ -238,7 +276,10 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
         tool_context=tool_context or None,
     )
 
-    return {"vulnerability_findings": vulnerabilities_raw}
+    result = {"vulnerability_findings": vulnerabilities_raw}
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "reason_vulnerabilities", result, duration_seconds=round(time.time() - t0, 3))
+    return result
 
 
 def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
@@ -275,12 +316,16 @@ def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
                 finding.status = "not_applicable"
                 finding.mitigating_controls = []
 
-    return {
+    result = {
         "vulnerability_findings": validated_report.model_dump(),
         "validation_errors": None,
         "retry_count": 0,
         "status": "vulnerabilities_validated",
     }
+    audit_id = state.get("audit_id")
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "validate_vulnerabilities", result)
+    return result
 
 
 def route_after_vulnerability_validation(
@@ -299,10 +344,14 @@ def route_after_vulnerability_validation(
 
 def node_finalize_agent_results(state: PipelineAgentState) -> Dict[str, Any]:
     """Final node: completes the state transition."""
-    return {
+    result = {
         "status": "completed",
         "validation_errors": None,
     }
+    audit_id = state.get("audit_id")
+    if audit_id:
+        save_step_checkpoint(audit_id, "Agent 1", "finalize_agent_results", result)
+    return result
 
 
 def build_pipeline_agent_graph():
@@ -348,8 +397,13 @@ def build_pipeline_agent_graph():
 def run_pipeline_agent(
     code: str,
     testing_agent_results: Optional[Dict[str, Any]] = None,
+    audit_id: Optional[str] = None,
+    force_resume: bool = False,
 ) -> Dict[str, Any]:
     """Executes Agent 1 (Pipeline & Threat Modeling Agent)."""
+    if audit_id:
+        verify_artifact_integrity(audit_id, code=code, force=force_resume)
+
     app = build_pipeline_agent_graph()
 
     initial_state: PipelineAgentState = {
@@ -358,6 +412,7 @@ def run_pipeline_agent(
         "retry_count": 0,
         "max_retries": 3,
         "status": "initialized",
+        "audit_id": audit_id,
     }
 
     return app.invoke(initial_state)

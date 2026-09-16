@@ -5,6 +5,7 @@ import uuid
 import json as _json
 import threading
 import asyncio
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import (
     FastAPI,
@@ -12,8 +13,9 @@ from fastapi import (
     Form,
     HTTPException,
     UploadFile,
+    Request,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from src.agents.pipeline_agent.pipeline_agent import (
     run_pipeline_agent,
@@ -37,6 +39,16 @@ from src.agents.reporting_agent.reporting_agent import (
 from src.core.audit_memory import (
     load_session,
     save_session,
+    StaleArtifactError,
+    register_audit_artifacts,
+    verify_artifact_integrity,
+    get_audit_ledger,
+    get_all_subtests,
+    find_audit_by_artifacts,
+    get_audit_summary,
+    invalidate_post_gate1_steps,
+    sync_subtests_for_audit,
+    get_subtests_by_artifacts,
 )
 
 
@@ -47,10 +59,30 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(StaleArtifactError)
+def stale_artifact_exception_handler(request: Request, exc: StaleArtifactError):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "stale_artifact_detected",
+            "message": str(exc),
+            "detail": "Target code, model, or dataset was modified since audit initialization. Resuming from this checkpoint would produce invalid findings.",
+        },
+    )
+
+
 @app.get("/")
 def root():
     return {
         "message": "AegisML API is running."
+    }
+
+
+@app.get("/system/docker-status")
+def get_docker_status():
+    from src.agents.testing_agent.sandbox_runner import is_docker_available
+    return {
+        "docker_available": is_docker_available(),
     }
 
 
@@ -221,14 +253,15 @@ def _build_saved_audit_result(
         {},
     )
 
+    audit_id = session.get("audit_id")
+    audit_summary = get_audit_summary(audit_id) if audit_id else {}
+
     return {
         "status": session.get(
             "status",
             "awaiting_gate_2",
         ),
-        "audit_id": session.get(
-            "audit_id"
-        ),
+        "audit_id": audit_id,
         "report": final_report,
         "deployment_context": _deployment_context(
             agent_1_result
@@ -245,6 +278,8 @@ def _build_saved_audit_result(
             "attack_strategy_plan",
             {},
         ),
+        "checkpoint_loaded": session.get("checkpoint_loaded", True),
+        "audit_memory": audit_summary,
     }
 
 
@@ -255,7 +290,13 @@ def _execute_agent_2_with_approved_plan(
         "agent_2_state"
     )
 
-    if not state:
+    if state:
+        approved_tests = session.get("attack_strategy_plan", {}).get("selected_tests")
+        if approved_tests:
+            state["planned_tests"] = list(approved_tests)
+            if "attack_strategy_plan" in state and isinstance(state["attack_strategy_plan"], dict):
+                state["attack_strategy_plan"]["selected_tests"] = list(approved_tests)
+    else:
         state = {
             "agent_1_results": (
                 session[
@@ -332,114 +373,44 @@ def _execute_agent_2_with_approved_plan(
             ),
         }
 
-    completed_steps = set(
-        session.get(
-            "completed_steps",
-            [],
+    # -----------------------------------------------------
+    # Agent 2 - Dynamic Sandbox (internal subtest caching & dispatch)
+    # -----------------------------------------------------
+    sandbox_update = (
+        node_execute_sandbox(
+            state
         )
+        or {}
     )
-
-    # -----------------------------------------------------
-    # Agent 2 - Dynamic Sandbox
-    # -----------------------------------------------------
-
-    if "sandbox" not in completed_steps:
-        update = (
-            node_execute_sandbox(
-                state
-            )
-            or {}
-        )
-
-        state.update(
-            update
-        )
-
-        completed_steps.add(
-            "sandbox"
-        )
-
-        session[
-            "completed_steps"
-        ] = list(
-            completed_steps
-        )
-
-        session[
-            "agent_2_state"
-        ] = state
-
-        _save_audit_session(
-            session
-        )
+    state.update(sandbox_update)
 
     # -----------------------------------------------------
     # Agent 2 - Forensic Diagnosis
     # -----------------------------------------------------
-
-    if "forensics" not in completed_steps:
-        update = (
-            node_forensic_diagnosis(
-                state
-            )
-            or {}
+    forensics_update = (
+        node_forensic_diagnosis(
+            state
         )
-
-        state.update(
-            update
-        )
-
-        completed_steps.add(
-            "forensics"
-        )
-
-        session[
-            "completed_steps"
-        ] = list(
-            completed_steps
-        )
-
-        session[
-            "agent_2_state"
-        ] = state
-
-        _save_audit_session(
-            session
-        )
+        or {}
+    )
+    state.update(forensics_update)
 
     # -----------------------------------------------------
     # Agent 2 - Aggregate Results
     # -----------------------------------------------------
-
-    if "aggregate" not in completed_steps:
-        update = (
-            node_aggregate_results(
-                state
-            )
-            or {}
+    aggregate_update = (
+        node_aggregate_results(
+            state
         )
+        or {}
+    )
+    state.update(aggregate_update)
 
-        state.update(
-            update
-        )
-
-        completed_steps.add(
-            "aggregate"
-        )
-
-        session[
-            "completed_steps"
-        ] = list(
-            completed_steps
-        )
-
-        session[
-            "agent_2_state"
-        ] = state
-
-        _save_audit_session(
-            session
-        )
+    completed_steps = set(session.get("completed_steps", []))
+    completed_steps.update(["sandbox", "forensics", "aggregate"])
+    session["completed_steps"] = list(completed_steps)
+    session["agent_2_state"] = state
+    _save_audit_session(session)
 
     return state
 
@@ -452,6 +423,13 @@ def plan_audit(
     text_column: str = Form("text"),
     label_column: str = Form("label"),
 ):
+    from src.agents.testing_agent.sandbox_runner import is_docker_available
+    if not is_docker_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Docker is unavailable. AegisML Zero-Trust policy requires an active Docker daemon to perform security audits.",
+        )
+
     _validate_upload_types(
         pipeline_file,
         model_file,
@@ -498,13 +476,36 @@ def plan_audit(
         ) as file:
             python_code = file.read()
 
+        # Check if an identical audit already exists in audit_memory
+        matching_audit_id = find_audit_by_artifacts(
+            code=python_code,
+            model_path=model_path,
+            dataset_path=dataset_path,
+        )
+
+        checkpoint_loaded = False
+        if matching_audit_id:
+            audit_id = matching_audit_id
+            checkpoint_loaded = True
+
+        register_audit_artifacts(
+            audit_id,
+            code=python_code,
+            model_path=model_path,
+            dataset_path=dataset_path,
+        )
+
         agent_1_result = (
             run_pipeline_agent(
-                python_code
+                python_code,
+                audit_id=audit_id,
             )
         )
 
         planning_state = {
+            "audit_id": (
+                audit_id
+            ),
             "agent_1_results": (
                 agent_1_result
             ),
@@ -530,7 +531,7 @@ def plan_audit(
 
         metadata_update = (
             node_prepare_metadata(
-                planning_state
+                planning_state,
             )
             or {}
         )
@@ -541,7 +542,7 @@ def plan_audit(
 
         strategy_update = (
             node_reason_strategy(
-                planning_state
+                planning_state,
             )
             or {}
         )
@@ -608,11 +609,14 @@ def plan_audit(
             "status": (
                 "awaiting_gate_1"
             ),
+            "checkpoint_loaded": checkpoint_loaded,
         }
 
         _save_audit_session(
             session
         )
+
+        audit_summary = get_audit_summary(audit_id)
 
         return {
             "status": (
@@ -621,6 +625,8 @@ def plan_audit(
             "audit_id": (
                 audit_id
             ),
+            "checkpoint_loaded": checkpoint_loaded,
+            "audit_memory": audit_summary,
             "attack_strategy_plan": (
                 planning_state.get(
                     "attack_strategy_plan",
@@ -700,7 +706,11 @@ def get_saved_audit(
         saved_result["execution_active"] = _is_execution_active(
             audit_id
         )
+        saved_result["checkpoint_loaded"] = True
         return saved_result
+
+    audit_summary = get_audit_summary(audit_id)
+    agent_1_result = session.get("agent_1_result", {})
 
     return {
         "status": session.get(
@@ -714,9 +724,48 @@ def get_saved_audit(
         ),
         "has_report": False,
         "is_final": False,
+        "checkpoint_loaded": True,
+        "audit_memory": audit_summary,
         "execution_active": _is_execution_active(
             audit_id
         ),
+        "attack_strategy_plan": session.get(
+            "attack_strategy_plan",
+            {},
+        ),
+        "pipeline_graph": agent_1_result.get(
+            "pipeline_graph",
+            {},
+        ),
+        "pipeline_source": session.get(
+            "pipeline_source",
+            "",
+        ),
+        "vulnerability_findings": agent_1_result.get(
+            "vulnerability_findings",
+            {},
+        ),
+        "deployment_context": _deployment_context(
+            agent_1_result
+        ),
+    }
+
+
+@app.get("/audit/{audit_id}/ledger")
+def get_audit_step_ledger(
+    audit_id: str,
+):
+    """
+    Returns the fine-grained chronological step-level checkpoint ledger
+    and completed dynamic sub-tests for this audit.
+    """
+    ledger = get_audit_ledger(audit_id)
+    subtests = get_all_subtests(audit_id)
+    return {
+        "audit_id": audit_id,
+        "steps_count": len(ledger),
+        "steps": ledger,
+        "completed_subtests": list(subtests.keys()),
     }
 
 
@@ -788,7 +837,15 @@ def stream_audit_telemetry(
 @app.post("/audit/execute")
 def execute_planned_audit(
     audit_id: str = Form(...),
+    selected_tests: Optional[str] = Form(None),
 ):
+    from src.agents.testing_agent.sandbox_runner import is_docker_available
+    if not is_docker_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Docker is unavailable. AegisML Zero-Trust policy requires an active Docker daemon to perform security audits.",
+        )
+
     session = (
         _get_audit_session(
             audit_id
@@ -803,6 +860,36 @@ def execute_planned_audit(
                 "not found or expired."
             ),
         )
+
+    invalidate_post_gate1_steps(audit_id)
+    sync_subtests_for_audit(
+        audit_id,
+        code=session.get("pipeline_source"),
+        model_path=session.get("model_path"),
+        dataset_path=session.get("dataset_path"),
+    )
+
+    if selected_tests:
+        try:
+            parsed = _json.loads(selected_tests)
+            if isinstance(parsed, list) and parsed:
+                if "attack_strategy_plan" in session and isinstance(session["attack_strategy_plan"], dict):
+                    session["attack_strategy_plan"]["selected_tests"] = parsed
+                if "agent_2_state" in session and isinstance(session["agent_2_state"], dict):
+                    session["agent_2_state"]["planned_tests"] = parsed
+                    if "attack_strategy_plan" in session["agent_2_state"]:
+                        session["agent_2_state"]["attack_strategy_plan"]["selected_tests"] = parsed
+        except Exception:
+            pass
+
+    # Ensure post-Gate-1 steps run freshly and don't skip
+    session["completed_steps"] = [
+        s for s in session.get("completed_steps", [])
+        if s in ("agent_1", "metadata", "strategy")
+    ]
+    session.pop("reporting_result", None)
+    session.pop("agent_2_result", None)
+    _save_audit_session(session)
 
     execution_lock = _get_execution_lock(
         audit_id
@@ -852,99 +939,87 @@ def execute_planned_audit(
         )
 
         # -------------------------------------------------
-        # Agent 3
+        # Agent 3 - Evidence-informed reporting
         # -------------------------------------------------
+        publish(
+            audit_id,
+            {
+                "event": (
+                    "agent_step_started"
+                ),
+                "agent": (
+                    "Agent 3"
+                ),
+                "step": (
+                    "Evidence-informed reporting"
+                ),
+                "message": (
+                    "Correlating static findings "
+                    "and dynamic evidence."
+                ),
+            },
+        )
 
-        if (
-            "agent_3"
-            not in session.get(
-                "completed_steps",
-                [],
+        reporting_result = (
+            run_reporting_agent(
+                agent_1_results=(
+                    session[
+                        "agent_1_result"
+                    ]
+                ),
+                agent_2_results=(
+                    agent_2_result
+                ),
+                audit_id=audit_id,
             )
-        ):
-            publish(
-                audit_id,
-                {
-                    "event": (
-                        "agent_step_started"
-                    ),
-                    "agent": (
-                        "Agent 3"
-                    ),
-                    "step": (
-                        "Evidence-informed reporting"
-                    ),
-                    "message": (
-                        "Correlating static findings "
-                        "and dynamic evidence."
-                    ),
-                },
-            )
+        )
 
-            reporting_result = (
-                run_reporting_agent(
-                    agent_1_results=(
-                        session[
-                            "agent_1_result"
-                        ]
-                    ),
-                    agent_2_results=(
-                        agent_2_result
-                    ),
+        session[
+            "reporting_result"
+        ] = reporting_result
+
+        session[
+            "completed_steps"
+        ] = list(
+            set(
+                session.get(
+                    "completed_steps",
+                    [],
                 )
             )
+            | {
+                "agent_3"
+            }
+        )
 
-            session[
-                "reporting_result"
-            ] = reporting_result
+        session[
+            "status"
+        ] = "awaiting_gate_2"
 
-            session[
-                "completed_steps"
-            ] = list(
-                set(
-                    session.get(
-                        "completed_steps",
-                        [],
-                    )
-                )
-                | {
-                    "agent_3"
-                }
-            )
+        _save_audit_session(
+            session
+        )
 
-            session[
-                "status"
-            ] = "awaiting_gate_2"
-
-            _save_audit_session(
-                session
-            )
-
-            publish(
-                audit_id,
-                {
-                    "event": (
-                        "agent_step_finished"
-                    ),
-                    "agent": (
-                        "Agent 3"
-                    ),
-                    "step": (
-                        "Evidence-informed reporting"
-                    ),
-                    "status": (
-                        "completed"
-                    ),
-                    "message": (
-                        "Final security report is ready."
-                    ),
-                },
-            )
-
-        else:
-            reporting_result = session[
-                "reporting_result"
-            ]
+        publish(
+            audit_id,
+            {
+                "event": (
+                    "agent_step_finished"
+                ),
+                "agent": (
+                    "Agent 3"
+                ),
+                "step": (
+                    "Evidence-informed reporting"
+                ),
+                "status": (
+                    "completed"
+                ),
+                "message": (
+                    "Final security report is ready."
+                ),
+            },
+        )
 
         saved_result = _build_saved_audit_result(
             session
@@ -1034,9 +1109,17 @@ def run_audit(
                     file.read()
                 )
 
+            register_audit_artifacts(
+                audit_id,
+                code=python_code,
+                model_path=model_path,
+                dataset_path=dataset_path,
+            )
+
             agent_1_result = (
                 run_pipeline_agent(
-                    python_code
+                    python_code,
+                    audit_id=audit_id,
                 )
             )
 
@@ -1060,6 +1143,7 @@ def run_audit(
                     label_column=(
                         label_column
                     ),
+                    audit_id=audit_id,
                 )
             )
 
@@ -1071,6 +1155,7 @@ def run_audit(
                     agent_2_results=(
                         agent_2_result
                     ),
+                    audit_id=audit_id,
                 )
             )
 

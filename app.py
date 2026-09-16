@@ -2,7 +2,7 @@ import io
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 import queue
 import threading
 import time
@@ -30,6 +30,7 @@ from ui.dashboard import (
     render_interactive_pipeline_graph,
     render_attack_strategy_gate,
     render_report_signoff_gate,
+    render_audit_ledger_panel,
 )
 
 
@@ -114,6 +115,67 @@ def get_saved_audit_state(
         f"{API_URL}/audit/{audit_id}",
         timeout=10,
     )
+
+
+def check_docker_available() -> bool:
+    """
+    Checks if Docker daemon is active and responsive.
+    Queries the FastAPI backend endpoint first; falls back to local subprocess if offline.
+    """
+    try:
+        resp = requests.get(f"{API_URL}/system/docker-status", timeout=2)
+        if resp.status_code == 200:
+            return bool(resp.json().get("docker_available", False))
+    except Exception:
+        pass
+
+    try:
+        from src.agents.testing_agent.sandbox_runner import is_docker_available
+        return is_docker_available()
+    except Exception:
+        return False
+
+
+def dismiss_docker_dialog():
+    st.session_state.show_docker_dialog = False
+
+
+@st.dialog("Docker Required for Security Audit", width="medium", on_dismiss=dismiss_docker_dialog)
+def show_docker_unavailable_dialog():
+    st.error(
+        "AegisML cannot run a security audit because the Docker daemon is offline or unreachable."
+    )
+    st.markdown(
+        """
+        **Zero-Trust Isolation Requirement:**
+        * **Container Isolation**: AegisML enforces strict container sandboxing to prevent untrusted 
+          machine learning code, model deserialization (pickle / joblib), and dynamic attacks from running 
+          on the host system.
+        * **Host Protection**: Running unverified dynamic penetration tests outside of Docker risks arbitrary 
+          code execution (RCE) and system compromise.
+
+        **To proceed:**
+        1. Open and start **Docker Desktop** (or start the Docker service).
+        2. Wait until the Docker engine reports that it is running.
+        3. Click **Re-check Docker** below to continue, or **Cancel** to abort.
+        """
+    )
+
+    dialog_col1, dialog_col2 = st.columns(2, gap="medium")
+    with dialog_col1:
+        if st.button("Re-check Docker", type="primary", use_container_width=True, key="dialog_recheck_btn"):
+            if check_docker_available():
+                st.session_state.show_docker_dialog = False
+                st.success("Docker daemon detected. Ready to proceed.")
+                time.sleep(0.4)
+                st.rerun()
+            else:
+                st.error("Docker daemon is still not reachable. Please verify Docker Desktop is running.")
+
+    with dialog_col2:
+        if st.button("Cancel", use_container_width=True, key="dialog_cancel_btn"):
+            st.session_state.show_docker_dialog = False
+            st.rerun()
 
 
 def resume_saved_audit_once(
@@ -305,6 +367,7 @@ def render_agent_progress(
 def run_approved_audit_with_progress(
     audit_id: str,
     progress_placeholder: Any,
+    selected_tests: Optional[List[str]] = None,
 ) -> requests.Response:
     """Execute the approved audit while streaming agent telemetry to the UI."""
     event_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
@@ -328,9 +391,12 @@ def run_approved_audit_with_progress(
 
     def execute_audit() -> None:
         try:
+            payload_data: Dict[str, Any] = {"audit_id": audit_id}
+            if selected_tests:
+                payload_data["selected_tests"] = json.dumps(selected_tests)
             response_holder["response"] = requests.post(
                 f"{API_URL}/audit/execute",
-                data={"audit_id": audit_id},
+                data=payload_data,
                 timeout=900,
             )
         except Exception as exc:
@@ -1278,6 +1344,11 @@ if "audit_id" not in st.session_state:
     st.session_state.audit_id = None
 if "report_signed_off" not in st.session_state:
     st.session_state.report_signed_off = False
+if "show_docker_dialog" not in st.session_state:
+    st.session_state.show_docker_dialog = False
+
+if st.session_state.get("show_docker_dialog", False):
+    show_docker_unavailable_dialog()
 
 recoverable_audit_id, recoverable_audit_phase = get_audit_resume_state()
 
@@ -1289,14 +1360,38 @@ if (
 ):
     st.session_state.audit_id = recoverable_audit_id
 
+# Automatic checkpoint restoration across browser refresh
+if (
+    st.session_state.audit_plan is None
+    and st.session_state.audit_result is None
+    and recoverable_audit_id
+):
+    try:
+        saved_resp = requests.get(f"{API_URL}/audit/{recoverable_audit_id}", timeout=5)
+        if saved_resp.status_code == 200:
+            saved_data = saved_resp.json()
+            if is_final_audit_payload(saved_data):
+                st.session_state.audit_result = saved_data
+                st.session_state.audit_id = recoverable_audit_id
+                st.session_state.audit_result["checkpoint_loaded"] = True
+            elif saved_data.get("status") == "awaiting_gate_1" or "attack_strategy_plan" in saved_data:
+                st.session_state.audit_plan = saved_data
+                st.session_state.audit_id = recoverable_audit_id
+                st.session_state.audit_plan["checkpoint_loaded"] = True
+    except Exception:
+        pass
+
 
 # =========================================================
 # GATE 1 - HUMAN ATTACK STRATEGY APPROVAL
 # =========================================================
 
 if st.session_state.audit_result is None and st.session_state.audit_plan is not None:
+    is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
+    gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
+
     st.html(
-        """
+        f"""
         <div class="upload-hero">
             <div class="upload-hero-left">
                 <div class="upload-brand-row">
@@ -1307,7 +1402,7 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
                     Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
                 </p>
             </div>
-            <div class="upload-status-badge">GATE 1 &middot; APPROVAL REQUIRED</div>
+            <div class="upload-status-badge">{gate_badge}</div>
         </div>
         """
     )
@@ -1315,12 +1410,21 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
     render_interactive_pipeline_graph(st.session_state.audit_plan)
 
     if render_attack_strategy_gate(st.session_state.audit_plan):
+        if not check_docker_available():
+            st.session_state.show_docker_dialog = True
+            st.rerun()
+
         remember_audit_resume_state(
             st.session_state.audit_id,
             "executing",
         )
 
         progress_placeholder = st.empty()
+
+        selected_tests = None
+        if isinstance(st.session_state.audit_plan, dict):
+            strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
+            selected_tests = strat_plan.get("selected_tests") or st.session_state.audit_plan.get("selected_tests")
 
         try:
             with st.spinner(
@@ -1329,6 +1433,7 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
                 response = run_approved_audit_with_progress(
                     st.session_state.audit_id,
                     progress_placeholder,
+                    selected_tests=selected_tests,
                 )
 
             if response.status_code == 200:
@@ -1438,6 +1543,10 @@ if st.session_state.audit_result is None:
                     use_container_width=True,
                     key="resume_previous_audit",
                 ):
+                    if action_label == "Resume audit" and not check_docker_available():
+                        st.session_state.show_docker_dialog = True
+                        st.rerun()
+
                     try:
                         st.session_state.audit_id = recoverable_audit_id
 
@@ -1687,6 +1796,10 @@ if st.session_state.audit_result is None:
                 "and dataset."
             )
 
+        elif not check_docker_available():
+            st.session_state.show_docker_dialog = True
+            st.rerun()
+
         else:
 
             files = {
@@ -1856,6 +1969,7 @@ else:
 
     tab_names = [
         "Pipeline & findings",
+        "Audit memory ledger",
         "Full report",
     ]
 
@@ -1863,9 +1977,9 @@ else:
     if st.session_state.active_report_section not in tab_names:
         st.session_state.active_report_section = "Pipeline & findings"
 
-    # Two equal-width tabs that fill the available page width.
+    # Three equal-width tabs that fill the available page width.
     tab_cols = st.columns(
-        [1, 1],
+        [1, 1, 1],
         gap="small",
     )
 
@@ -1884,9 +1998,9 @@ else:
 
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
         > div {
-            flex: 1 1 50% !important;
-            width: 50% !important;
-            max-width: 50% !important;
+            flex: 1 1 33.33% !important;
+            width: 33.33% !important;
+            max-width: 33.33% !important;
         }
 
         div[data-testid="stHorizontalBlock"]:has(.aegis-tabs-anchor)
@@ -1958,6 +2072,12 @@ else:
 
     if active_section == "Pipeline & findings":
 
+        if result.get("checkpoint_loaded"):
+            st.info(
+                "Audit Memory Active: Analysis results were restored from persistent step checkpoints. "
+                "Review the 'Audit memory ledger' tab for granular node timings and SHA-256 verification."
+            )
+
         st.markdown("## Interactive pipeline graph")
         render_interactive_pipeline_graph(result)
         st.divider()
@@ -1993,6 +2113,37 @@ else:
                 "Re-scan",
                 use_container_width=True,
                 key="pipeline_rescan",
+            ):
+                st.session_state.audit_result = None
+                st.session_state.audit_plan = None
+                st.session_state.audit_id = None
+                st.session_state.report_signed_off = False
+                st.session_state.active_report_section = "Pipeline & findings"
+                clear_audit_resume_state()
+                st.rerun()
+
+    elif active_section == "Audit memory ledger":
+
+        render_audit_ledger_panel(result)
+        st.divider()
+
+        pipeline_footer_info, pipeline_spacer, pipeline_rescan_col = (
+            st.columns(
+                [6, 1, 1.2]
+            )
+        )
+
+        with pipeline_footer_info:
+            st.caption(
+                f"Audit session {result.get('audit_id', '')[:12]}… · "
+                "Step checkpoints verified in audit_memory.db"
+            )
+
+        with pipeline_rescan_col:
+            if st.button(
+                "Re-scan",
+                use_container_width=True,
+                key="ledger_rescan",
             ):
                 st.session_state.audit_result = None
                 st.session_state.audit_plan = None

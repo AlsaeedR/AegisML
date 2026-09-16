@@ -15,11 +15,13 @@ print(f"Reading target pipeline from: {target_pipeline_path}")
 with open(target_pipeline_path, "r", encoding="utf-8") as f:
     python_code = f.read()
 
+audit_id = os.getenv("AEGISML_AUDIT_ID", "cli_audit_session")
+
 # ---------------------------------------------------------
 # Phase 1: Execute Agent 1 (Pipeline & Threat Modeling)
 # ---------------------------------------------------------
 print("\nExecuting Agent 1 (Pipeline & Threat Modeling Agent)...")
-agent_1_result = run_pipeline_agent(python_code)
+agent_1_result = run_pipeline_agent(python_code, audit_id=audit_id)
 
 print("\n=== [AGENT 1] PIPELINE GRAPH ===")
 print(json.dumps(agent_1_result.get("pipeline_graph"), indent=2))
@@ -45,6 +47,7 @@ if os.path.exists(model_path) and os.path.exists(dataset_path):
         pipeline_path=target_pipeline_path,
         text_column="text",
         label_column="label",
+        audit_id=audit_id,
     )
 
     print("\n=== [AGENT 2] DYNAMIC TEST RESULTS ===")
@@ -66,6 +69,7 @@ if os.path.exists(model_path) and os.path.exists(dataset_path):
     agent_3_result = run_reporting_agent(
         agent_1_results=agent_1_result,
         agent_2_results=agent_2_result,
+        audit_id=audit_id,
     )
 
     print("\n=== [AGENT 3] FINAL SECURITY AUDIT REPORT ===")
