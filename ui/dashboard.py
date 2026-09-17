@@ -1624,19 +1624,8 @@ def render_interactive_pipeline_graph(
             selected_id
         )
 
-        # Guard against multiple dialogs being opened in the same Streamlit script run
-        dialog_blocked = bool(st.session_state.get("show_docker_dialog", False))
-        if not dialog_blocked:
-            try:
-                from streamlit.runtime.scriptrunner import get_script_run_ctx
-                ctx = get_script_run_ctx()
-                if ctx and getattr(ctx, "has_dialog_opened", False):
-                    dialog_blocked = True
-            except Exception:
-                pass
-
-        if node is not None and not dialog_blocked:
-            # Avoid reopening on every interaction if user already dismissed this node
+        if node is not None:
+            # Display inline inspector below the graph if not dismissed
             if selected_id != st.session_state.get("_dismissed_pipeline_node"):
                 st.session_state["_active_pipeline_node"] = selected_id
                 finding = _find_related_finding(
@@ -1644,49 +1633,51 @@ def render_interactive_pipeline_graph(
                     node,
                 )
 
-                def _on_dismiss_node_inspection() -> None:
-                    st.session_state["_dismissed_pipeline_node"] = st.session_state.get("_active_pipeline_node")
-
-                @st.dialog(
-                    "Pipeline node inspection",
-                    width="large",
-                    on_dismiss=_on_dismiss_node_inspection,
-                )
-                def show_node_inspection() -> None:
-                    node_name = str(
+                node_name = str(
+                    node.get(
+                        "name",
                         node.get(
-                            "name",
-                            node.get(
-                                "label",
-                                selected_id,
-                            ),
+                            "label",
+                            selected_id,
+                        ),
+                    )
+                )
+
+                ast_type = (
+                    node.get("ast_node_type")
+                    or node.get("ast_type")
+                    or node.get("node_type")
+                    or node.get("type")
+                    or "Unavailable"
+                )
+
+                component_type = (
+                    node.get("component_type")
+                    or node.get("category")
+                    or node.get("component")
+                    or "Pipeline component"
+                )
+
+                line_number = (
+                    node.get("line_number")
+                    or node.get("lineno")
+                    or node.get("line")
+                )
+
+                with st.container(border=True):
+                    header_col1, header_col2 = st.columns([5, 1])
+                    with header_col1:
+                        st.markdown(
+                            f"#### Pipeline Node Inspector: `{node_name}`"
                         )
-                    )
-
-                    ast_type = (
-                        node.get("ast_node_type")
-                        or node.get("ast_type")
-                        or node.get("node_type")
-                        or node.get("type")
-                        or "Unavailable"
-                    )
-
-                    component_type = (
-                        node.get("component_type")
-                        or node.get("category")
-                        or node.get("component")
-                        or "Pipeline component"
-                    )
-
-                    line_number = (
-                        node.get("line_number")
-                        or node.get("lineno")
-                        or node.get("line")
-                    )
-
-                    st.markdown(
-                        f"### {node_name}"
-                    )
+                    with header_col2:
+                        if st.button(
+                            "Close Inspector",
+                            key=f"close_node_inspector_{selected_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["_dismissed_pipeline_node"] = selected_id
+                            st.rerun()
 
                     meta_col1, meta_col2, meta_col3 = (
                         st.columns(3)
@@ -1718,7 +1709,7 @@ def render_interactive_pipeline_graph(
                     )
 
                     st.markdown(
-                        "#### Source context"
+                        "##### Source context"
                     )
 
                     source_context = _extract_source_context(
@@ -1733,7 +1724,7 @@ def render_interactive_pipeline_graph(
 
                     if finding:
                         st.markdown(
-                            "#### Related security finding"
+                            "##### Related security finding"
                         )
 
                         risk_col1, risk_col2, risk_col3 = (
@@ -1793,11 +1784,6 @@ def render_interactive_pipeline_graph(
                             "No report finding is directly mapped "
                             "to this pipeline node."
                         )
-
-                try:
-                    show_node_inspection()
-                except Exception:
-                    pass
 
         return selected_id
 

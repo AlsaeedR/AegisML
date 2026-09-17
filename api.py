@@ -49,6 +49,7 @@ from src.core.audit_memory import (
     invalidate_post_gate1_steps,
     sync_subtests_for_audit,
     get_subtests_by_artifacts,
+    is_post_gate1_fully_cached,
 )
 
 
@@ -334,6 +335,7 @@ def _execute_agent_2_with_approved_plan(
                 ]
             ),
             "vectorizer_path": None,
+            "pipeline_source": session.get("pipeline_source", ""),
             "test_targets": None,
             "dataset_profile": (
                 session.get(
@@ -861,18 +863,12 @@ def execute_planned_audit(
             ),
         )
 
-    invalidate_post_gate1_steps(audit_id)
-    sync_subtests_for_audit(
-        audit_id,
-        code=session.get("pipeline_source"),
-        model_path=session.get("model_path"),
-        dataset_path=session.get("dataset_path"),
-    )
-
+    selected_tests_list = None
     if selected_tests:
         try:
             parsed = _json.loads(selected_tests)
             if isinstance(parsed, list) and parsed:
+                selected_tests_list = parsed
                 if "attack_strategy_plan" in session and isinstance(session["attack_strategy_plan"], dict):
                     session["attack_strategy_plan"]["selected_tests"] = parsed
                 if "agent_2_state" in session and isinstance(session["agent_2_state"], dict):
@@ -882,13 +878,28 @@ def execute_planned_audit(
         except Exception:
             pass
 
-    # Ensure post-Gate-1 steps run freshly and don't skip
-    session["completed_steps"] = [
-        s for s in session.get("completed_steps", [])
-        if s in ("agent_1", "metadata", "strategy")
-    ]
-    session.pop("reporting_result", None)
-    session.pop("agent_2_result", None)
+    if not selected_tests_list:
+        selected_tests_list = (
+            session.get("attack_strategy_plan", {}).get("selected_tests")
+            or ["V1_poisoning", "V2_preprocessing", "V3_validation", "V4_adversarial"]
+        )
+
+    sync_subtests_for_audit(
+        audit_id,
+        code=session.get("pipeline_source"),
+        model_path=session.get("model_path"),
+        dataset_path=session.get("dataset_path"),
+    )
+
+    if not is_post_gate1_fully_cached(audit_id, selected_tests_list):
+        invalidate_post_gate1_steps(audit_id)
+        session["completed_steps"] = [
+            s for s in session.get("completed_steps", [])
+            if s in ("agent_1", "metadata", "strategy")
+        ]
+        session.pop("reporting_result", None)
+        session.pop("agent_2_result", None)
+
     _save_audit_session(session)
 
     execution_lock = _get_execution_lock(

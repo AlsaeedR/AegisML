@@ -36,6 +36,7 @@ from .tools import (
 from src.core.audit_memory import (
     get_step_checkpoint,
     save_step_checkpoint,
+    has_step_completed,
     get_subtest_checkpoint,
     save_subtest_checkpoint,
     get_all_subtests,
@@ -430,8 +431,7 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
             "status": "executed",
             "message": f"Dynamic tests restored from memory: {', '.join(planned_tests)}",
         })
-        invalidate_post_gate1_steps(audit_id)
-        return {
+        res = {
             "sandbox_status": "executed",
             "sandbox_telemetry": {"duration_seconds": 0.0, "cached": True},
             "poisoning_evidence": cached_subtests.get("V1_poisoning", {}),
@@ -440,6 +440,9 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
             "validation_evidence": cached_subtests.get("V3_validation", {}),
             "execution_plan_log": log,
         }
+        if not has_step_completed(audit_id, "execute_sandbox"):
+            save_step_checkpoint(audit_id, "Agent 2", "execute_sandbox", res, duration_seconds=0.0)
+        return res
 
     publish(audit_id, {
         "event": "agent_step_started",
