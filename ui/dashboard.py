@@ -1624,159 +1624,180 @@ def render_interactive_pipeline_graph(
             selected_id
         )
 
-        if node is not None:
-            finding = _find_related_finding(
-                result,
-                node,
-            )
+        # Guard against multiple dialogs being opened in the same Streamlit script run
+        dialog_blocked = bool(st.session_state.get("show_docker_dialog", False))
+        if not dialog_blocked:
+            try:
+                from streamlit.runtime.scriptrunner import get_script_run_ctx
+                ctx = get_script_run_ctx()
+                if ctx and getattr(ctx, "has_dialog_opened", False):
+                    dialog_blocked = True
+            except Exception:
+                pass
 
-            @st.dialog(
-                "Pipeline node inspection",
-                width="large",
-            )
-            def show_node_inspection() -> None:
-                node_name = str(
-                    node.get(
-                        "name",
+        if node is not None and not dialog_blocked:
+            # Avoid reopening on every interaction if user already dismissed this node
+            if selected_id != st.session_state.get("_dismissed_pipeline_node"):
+                st.session_state["_active_pipeline_node"] = selected_id
+                finding = _find_related_finding(
+                    result,
+                    node,
+                )
+
+                def _on_dismiss_node_inspection() -> None:
+                    st.session_state["_dismissed_pipeline_node"] = st.session_state.get("_active_pipeline_node")
+
+                @st.dialog(
+                    "Pipeline node inspection",
+                    width="large",
+                    on_dismiss=_on_dismiss_node_inspection,
+                )
+                def show_node_inspection() -> None:
+                    node_name = str(
                         node.get(
-                            "label",
-                            selected_id,
-                        ),
-                    )
-                )
-
-                ast_type = (
-                    node.get("ast_node_type")
-                    or node.get("ast_type")
-                    or node.get("node_type")
-                    or node.get("type")
-                    or "Unavailable"
-                )
-
-                component_type = (
-                    node.get("component_type")
-                    or node.get("category")
-                    or node.get("component")
-                    or "Pipeline component"
-                )
-
-                line_number = (
-                    node.get("line_number")
-                    or node.get("lineno")
-                    or node.get("line")
-                )
-
-                st.markdown(
-                    f"### {node_name}"
-                )
-
-                meta_col1, meta_col2, meta_col3 = (
-                    st.columns(3)
-                )
-
-                meta_col1.metric(
-                    "Component",
-                    str(
-                        component_type
-                    ),
-                )
-
-                meta_col2.metric(
-                    "AST node",
-                    str(
-                        ast_type
-                    ),
-                )
-
-                meta_col3.metric(
-                    "Source line",
-                    (
-                        str(
-                            line_number
+                            "name",
+                            node.get(
+                                "label",
+                                selected_id,
+                            ),
                         )
-                        if line_number
-                        else "N/A"
-                    ),
-                )
-
-                st.markdown(
-                    "#### Source context"
-                )
-
-                source_context = _extract_source_context(
-                    source_code,
-                    line_number,
-                )
-
-                st.code(
-                    source_context,
-                    language="python",
-                )
-
-                if finding:
-                    st.markdown(
-                        "#### Related security finding"
                     )
 
-                    risk_col1, risk_col2, risk_col3 = (
+                    ast_type = (
+                        node.get("ast_node_type")
+                        or node.get("ast_type")
+                        or node.get("node_type")
+                        or node.get("type")
+                        or "Unavailable"
+                    )
+
+                    component_type = (
+                        node.get("component_type")
+                        or node.get("category")
+                        or node.get("component")
+                        or "Pipeline component"
+                    )
+
+                    line_number = (
+                        node.get("line_number")
+                        or node.get("lineno")
+                        or node.get("line")
+                    )
+
+                    st.markdown(
+                        f"### {node_name}"
+                    )
+
+                    meta_col1, meta_col2, meta_col3 = (
                         st.columns(3)
                     )
 
-                    risk_col1.metric(
-                        "Finding",
+                    meta_col1.metric(
+                        "Component",
                         str(
-                            finding.get(
-                                "vulnerability_id",
-                                "N/A",
-                            )
+                            component_type
                         ),
                     )
 
-                    risk_col2.metric(
-                        "Risk score",
+                    meta_col2.metric(
+                        "AST node",
+                        str(
+                            ast_type
+                        ),
+                    )
+
+                    meta_col3.metric(
+                        "Source line",
                         (
-                            f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
+                            str(
+                                line_number
+                            )
+                            if line_number
+                            else "N/A"
                         ),
                     )
 
-                    risk_col3.metric(
-                        "Status",
-                        str(
+                    st.markdown(
+                        "#### Source context"
+                    )
+
+                    source_context = _extract_source_context(
+                        source_code,
+                        line_number,
+                    )
+
+                    st.code(
+                        source_context,
+                        language="python",
+                    )
+
+                    if finding:
+                        st.markdown(
+                            "#### Related security finding"
+                        )
+
+                        risk_col1, risk_col2, risk_col3 = (
+                            st.columns(3)
+                        )
+
+                        risk_col1.metric(
+                            "Finding",
+                            str(
+                                finding.get(
+                                    "vulnerability_id",
+                                    "N/A",
+                                )
+                            ),
+                        )
+
+                        risk_col2.metric(
+                            "Risk score",
+                            (
+                                f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
+                            ),
+                        )
+
+                        risk_col3.metric(
+                            "Status",
+                            str(
+                                finding.get(
+                                    "test_status",
+                                    "not_tested",
+                                )
+                            ),
+                        )
+
+                        st.write(
                             finding.get(
-                                "test_status",
-                                "not_tested",
-                            )
-                        ),
-                    )
-
-                    st.write(
-                        finding.get(
-                            "description",
-                            "No finding description is available.",
-                        )
-                    )
-
-                    affected = finding.get(
-                        "affected_components",
-                        [],
-                    )
-
-                    if affected:
-                        st.caption(
-                            "Affected components: "
-                            + ", ".join(
-                                str(item)
-                                for item in affected
+                                "description",
+                                "No finding description is available.",
                             )
                         )
 
-                else:
-                    st.info(
-                        "No report finding is directly mapped "
-                        "to this pipeline node."
-                    )
+                        affected = finding.get(
+                            "affected_components",
+                            [],
+                        )
 
-            show_node_inspection()
+                        if affected:
+                            st.caption(
+                                "Affected components: "
+                                + ", ".join(
+                                    str(item)
+                                    for item in affected
+                                )
+                            )
+
+                    else:
+                        st.info(
+                            "No report finding is directly mapped "
+                            "to this pipeline node."
+                        )
+
+                try:
+                    show_node_inspection()
+                except Exception:
+                    pass
 
         return selected_id
 
