@@ -15,6 +15,19 @@ NODE_TYPE_COLORS = {
     "unclassified": "#6B7280",
 }
 
+PIPELINE_STAGES = {
+    "data_ingestion": {"stage_index": 0, "stage_name": "Data Ingestion", "icon": "input"},
+    "validation": {"stage_index": 1, "stage_name": "Validation & Guards", "icon": "shield"},
+    "preprocessing": {"stage_index": 2, "stage_name": "Feature Engineering", "icon": "filter"},
+    "preprocessing_routine": {"stage_index": 2, "stage_name": "Feature Engineering", "icon": "filter"},
+    "model_training": {"stage_index": 3, "stage_name": "Model Architecture", "icon": "cpu"},
+    "training_routine": {"stage_index": 3, "stage_name": "Model Architecture", "icon": "cpu"},
+    "inference": {"stage_index": 4, "stage_name": "Inference & Decision", "icon": "check"},
+    "persistence": {"stage_index": 4, "stage_name": "Inference & Persistence", "icon": "save"},
+    "error": {"stage_index": 1, "stage_name": "Validation & Guards", "icon": "alert"},
+    "unclassified": {"stage_index": 2, "stage_name": "Pipeline Logic", "icon": "code"},
+}
+
 
 class PipelineExtractor(ast.NodeVisitor):
     """
@@ -39,6 +52,13 @@ class PipelineExtractor(ast.NodeVisitor):
             for line_no in range(start, end + 1)
         )
 
+    def _extract_string_arg(self, node: ast.Call, arg_idx: int = 0) -> str:
+        """Extract a string literal argument (e.g. filename) from a call node."""
+        if len(node.args) > arg_idx and isinstance(node.args[arg_idx], ast.Constant):
+            val = str(node.args[arg_idx].value)
+            return val.split("/")[-1].split("\\")[-1]
+        return ""
+
     def _add_node(
         self,
         step_type: str,
@@ -48,25 +68,20 @@ class PipelineExtractor(ast.NodeVisitor):
         name: Optional[str] = None,
     ) -> str:
         node_id = f"{step_type}_{len(self.nodes) + 1}"
+        stage_info = PIPELINE_STAGES.get(step_type, PIPELINE_STAGES["unclassified"])
         node_data = {
             "id": node_id,
             "name": name or description,
             "type": step_type,
             "component_type": step_type,
+            "stage_index": stage_info["stage_index"],
+            "stage_name": stage_info["stage_name"],
             "description": description,
             "line_number": line_number,
             "ast_node_type": ast_node_type or "Unknown",
             "source_snippet": self._get_source_snippet(line_number),
         }
         self.nodes.append(node_data)
-        if self.last_node_id is not None:
-            self.edges.append({
-                "from": self.last_node_id,
-                "to": node_id,
-                "source": self.last_node_id,
-                "target": node_id,
-            })
-        self.last_node_id = node_id
         return node_id
 
     def visit_Call(self, node: ast.Call):
@@ -81,59 +96,55 @@ class PipelineExtractor(ast.NodeVisitor):
 
         ingestion_identifiers = {
             "read_csv", "read_json", "read_parquet", "read_excel", "read_table",
-            "load_dataset", "open", "input", "file_uploader", "from_csv",
+            "load_dataset", "file_uploader", "from_csv",
         }
         if call_name in ingestion_identifiers:
+            filename = self._extract_string_arg(node, 0)
+            disp_name = f"pd.{call_name}('{filename}')" if filename else f"pd.{call_name}()"
             self._add_node(
                 step_type="data_ingestion",
-                description=f"Loads data via '{call_name}'",
+                description=f"Loads data via '{call_name}'" + (f" ({filename})" if filename else ""),
                 line_number=line,
                 ast_node_type=ast_type,
-                name=call_name,
+                name=disp_name,
             )
 
-        preprocessing_keywords = {
-            "preprocess", "clean", "tokenize", "stem", "normalize",
-            "transform", "vectorize",
-        }
-        if any(keyword in call_name for keyword in preprocessing_keywords):
-            if call_name not in ingestion_identifiers:
-                self._add_node(
-                    step_type="preprocessing",
-                    description=f"Executes data transformation via '{call_name}'",
-                    line_number=line,
-                    ast_node_type=ast_type,
-                    name=call_name,
-                )
+        elif call_name in {"fit_transform", "transform", "vectorize", "stem", "tokenize", "normalize"}:
+            self._add_node(
+                step_type="preprocessing",
+                description=f"Executes data transformation via '{call_name}'",
+                line_number=line,
+                ast_node_type=ast_type,
+                name=f"{call_name}()",
+            )
 
-        training_identifiers = {"fit", "fit_transform", "train"}
-        if call_name in training_identifiers:
+        elif call_name in {"fit", "train"}:
             self._add_node(
                 step_type="model_training",
                 description=f"Fits model or feature extractor via '{call_name}'",
                 line_number=line,
                 ast_node_type=ast_type,
-                name=call_name,
+                name="model.fit()",
             )
 
-        inference_identifiers = {"predict", "predict_proba", "infer", "evaluate", "score"}
-        if call_name in inference_identifiers:
+        elif call_name in {"predict", "predict_proba", "infer"}:
             self._add_node(
                 step_type="inference",
-                description=f"Executes model inference or evaluation via '{call_name}'",
+                description=f"Executes model inference via '{call_name}'",
                 line_number=line,
                 ast_node_type=ast_type,
-                name=call_name,
+                name="model.predict()",
             )
 
-        serialization_identifiers = {"dump", "save", "save_weights", "to_pickle", "to_parquet"}
-        if call_name in serialization_identifiers:
+        elif call_name in {"dump", "save", "save_weights", "to_pickle", "to_parquet"}:
+            target_name = self._extract_string_arg(node, 1) or self._extract_string_arg(node, 0)
+            disp_name = f"joblib.dump('{target_name}')" if target_name else "joblib.dump()"
             self._add_node(
                 step_type="persistence",
-                description=f"Serializes artifact via '{call_name}'",
+                description=f"Serializes artifact via '{call_name}'" + (f" to '{target_name}'" if target_name else ""),
                 line_number=line,
                 ast_node_type=ast_type,
-                name=call_name,
+                name=disp_name,
             )
 
         self.generic_visit(node)
@@ -143,13 +154,13 @@ class PipelineExtractor(ast.NodeVisitor):
         line = getattr(node, "lineno", None)
         ast_type = type(node).__name__
 
-        if any(keyword in name_lower for keyword in ["preprocess", "clean", "sanitize", "transform"]):
+        if any(keyword in name_lower for keyword in ["preprocess", "clean", "sanitize", "transform", "tokenize"]):
             self._add_node(
                 step_type="preprocessing_routine",
                 description=f"Defines data processing routine '{node.name}'",
                 line_number=line,
                 ast_node_type=ast_type,
-                name=node.name,
+                name=f"{node.name}()",
             )
         elif any(keyword in name_lower for keyword in ["train", "fit", "evaluate"]):
             self._add_node(
@@ -157,7 +168,7 @@ class PipelineExtractor(ast.NodeVisitor):
                 description=f"Defines model pipeline routine '{node.name}'",
                 line_number=line,
                 ast_node_type=ast_type,
-                name=node.name,
+                name=f"{node.name}()",
             )
         self.generic_visit(node)
 
@@ -165,31 +176,27 @@ class PipelineExtractor(ast.NodeVisitor):
         line = getattr(node, "lineno", None)
         ast_type = type(node).__name__
 
-        if isinstance(node.test, ast.Call):
-            if isinstance(node.test.func, ast.Name) and node.test.func.id == "isinstance":
+        test_node = node.test
+        if isinstance(test_node, ast.UnaryOp) and isinstance(test_node.op, ast.Not):
+            test_node = test_node.operand
+
+        if isinstance(test_node, ast.Call):
+            if isinstance(test_node.func, ast.Name) and test_node.func.id == "isinstance":
                 self._add_node(
                     step_type="validation",
                     description="Type verification using isinstance",
                     line_number=line,
                     ast_node_type=ast_type,
-                    name="isinstance validation",
+                    name="isinstance() guard",
                 )
-            elif isinstance(node.test.func, ast.Attribute) and node.test.func.attr.lower() in {"isna", "isnull", "empty"}:
+            elif isinstance(test_node.func, ast.Attribute) and test_node.func.attr.lower() in {"isna", "isnull", "empty", "isnan"}:
                 self._add_node(
                     step_type="validation",
                     description="Null or empty input verification",
                     line_number=line,
                     ast_node_type=ast_type,
-                    name="null validation",
+                    name="null/empty guard",
                 )
-        elif isinstance(node.test, ast.Compare):
-            self._add_node(
-                step_type="validation",
-                description="Conditional range or equality check",
-                line_number=line,
-                ast_node_type=ast_type,
-                name="conditional validation",
-            )
         self.generic_visit(node)
 
     def visit_Assert(self, node: ast.Assert):
@@ -199,20 +206,107 @@ class PipelineExtractor(ast.NodeVisitor):
             description="Validation assertion via assert statement",
             line_number=line,
             ast_node_type=type(node).__name__,
-            name="assert validation",
+            name="assert statement",
         )
         self.generic_visit(node)
 
     def visit_Try(self, node: ast.Try):
         line = getattr(node, "lineno", None)
+        body_dump = ast.dump(node).lower()
+        # Skip package downloads or environment checks like nltk.download
+        if "download" in body_dump and "nltk" in body_dump:
+            self.generic_visit(node)
+            return
+
         self._add_node(
             step_type="validation",
             description="Defensive exception handling via try/except block",
             line_number=line,
             ast_node_type=type(node).__name__,
-            name="exception handling",
+            name="try/except guard",
         )
         self.generic_visit(node)
+
+
+def construct_hierarchical_edges(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Construct a true multi-branch convergent/divergent DAG connecting the 5 pipeline lifecycle stages:
+    Stage 0 (Ingestion) -> Stage 1 (Validation Guards) -> Stage 2 (Feature Engineering) ->
+    Stage 3 (Model Architecture) -> Stage 4 (Inference & Persistence).
+    """
+    by_stage: Dict[int, List[Dict[str, Any]]] = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for n in nodes:
+        stage_idx = int(n.get("stage_index", 2))
+        by_stage.setdefault(stage_idx, []).append(n)
+
+    edges: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add_edge(src_id: str, dst_id: str, label: str = ""):
+        if src_id and dst_id and src_id != dst_id and (src_id, dst_id) not in seen:
+            seen.add((src_id, dst_id))
+            edges.append({
+                "from": src_id,
+                "to": dst_id,
+                "source": src_id,
+                "target": dst_id,
+                "label": label,
+            })
+
+    ing_nodes = by_stage.get(0, [])
+    val_nodes = by_stage.get(1, [])
+    prep_nodes = by_stage.get(2, [])
+    model_nodes = by_stage.get(3, [])
+    out_nodes = by_stage.get(4, [])
+
+    # 1. Stage 0 Ingestion feeds Stage 1 Validation guards or Stage 2 Preprocessing
+    if ing_nodes:
+        if val_nodes:
+            for ing in ing_nodes:
+                for val in val_nodes:
+                    add_edge(ing["id"], val["id"], "guards")
+            if prep_nodes:
+                for val in val_nodes:
+                    add_edge(val["id"], prep_nodes[0]["id"], "validates")
+        elif prep_nodes:
+            for ing in ing_nodes:
+                add_edge(ing["id"], prep_nodes[0]["id"], "raw data")
+
+    # 2. Sequence through preprocessing transformations within Stage 2
+    if len(prep_nodes) > 1:
+        for i in range(len(prep_nodes) - 1):
+            add_edge(prep_nodes[i]["id"], prep_nodes[i + 1]["id"], "transforms")
+
+    # 3. Last Preprocessing node feeds Stage 3 Model Training and any preprocessor persistence
+    if prep_nodes:
+        last_prep = prep_nodes[-1]
+        for m in model_nodes:
+            add_edge(last_prep["id"], m["id"], "features")
+        for out in out_nodes:
+            name_lower = out.get("name", "").lower()
+            if any(k in name_lower for k in ["vectorizer", "scaler", "encoder", "tfidf", "vocab"]):
+                add_edge(last_prep["id"], out["id"], "artifact")
+
+    # 4. Stage 3 Model Training feeds Stage 4 Inference and Model Persistence
+    if model_nodes:
+        last_model = model_nodes[-1]
+        for out in out_nodes:
+            name_lower = out.get("name", "").lower()
+            if not any(k in name_lower for k in ["vectorizer", "scaler", "encoder", "tfidf", "vocab"]):
+                add_edge(last_model["id"], out["id"], "weights")
+
+    # 5. Inference feeds downstream model persistence or evaluation
+    infer_nodes = [o for o in out_nodes if o.get("type") == "inference"]
+    persist_model_nodes = [
+        o for o in out_nodes
+        if o.get("type") == "persistence"
+        and not any(k in o.get("name", "").lower() for k in ["vectorizer", "scaler", "encoder", "tfidf", "vocab"])
+    ]
+    for inf in infer_nodes:
+        for p in persist_model_nodes:
+            add_edge(inf["id"], p["id"], "evaluated")
+
+    return edges
 
 
 def parse_python_pipeline(code: str) -> Dict[str, Any]:
@@ -241,7 +335,7 @@ def parse_python_pipeline(code: str) -> Dict[str, Any]:
     extractor = PipelineExtractor(source_code=code)
     extractor.visit(tree)
     nodes = extractor.nodes
-    edges = extractor.edges
+    edges = construct_hierarchical_edges(nodes)
 
     if not nodes:
         nodes = [
@@ -329,7 +423,7 @@ def compute_layered_layout(
 
 
 def enrich_pipeline_graph_for_ui(pipeline_graph: Dict[str, Any]) -> Dict[str, Any]:
-    """Enriches pipeline nodes with layout coordinates and UI color metadata."""
+    """Enriches pipeline nodes with stage classification, layout coordinates, and UI color metadata."""
     graph = build_networkx_graph(pipeline_graph)
     layout = compute_layered_layout(graph)
     enriched_nodes: List[Dict[str, Any]] = []
@@ -338,11 +432,14 @@ def enrich_pipeline_graph_for_ui(pipeline_graph: Dict[str, Any]) -> Dict[str, An
         node_id = node.get("id")
         coords = layout.get(node_id, {"x": 0.0, "y": 0.0, "level": 0})
         node_type = node.get("type", "unclassified")
+        stage_info = PIPELINE_STAGES.get(node_type, PIPELINE_STAGES["unclassified"])
         enriched_nodes.append({
             **node,
             "x": coords["x"],
             "y": coords["y"],
             "level": coords["level"],
+            "stage_index": stage_info["stage_index"],
+            "stage_name": stage_info["stage_name"],
             "color": NODE_TYPE_COLORS.get(node_type, NODE_TYPE_COLORS["unclassified"]),
         })
 

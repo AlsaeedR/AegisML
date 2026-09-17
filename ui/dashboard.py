@@ -6,6 +6,15 @@ import networkx as nx
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
 
+try:
+    from streamlit_flow import streamlit_flow
+    from streamlit_flow.elements import StreamlitFlowNode, StreamlitFlowEdge
+    from streamlit_flow.state import StreamlitFlowState
+    from streamlit_flow.layouts import ManualLayout, LayeredLayout
+    HAS_STREAMLIT_FLOW = True
+except Exception:
+    HAS_STREAMLIT_FLOW = False
+
 
 def escape(value: Any) -> str:
     return html.escape(
@@ -663,7 +672,7 @@ def render_dashboard(
     pipeline_html = "".join(
         [
             pipeline_node(
-                "📥",
+                "[INGEST]",
                 "Data ingestion",
                 "data poisoning assessment",
                 poisoning,
@@ -671,7 +680,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "🧹",
+                "[PREP]",
                 "Preprocessing",
                 "preprocessing assessment",
                 preprocessing,
@@ -679,7 +688,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "🧠",
+                "[MODEL]",
                 "ML pipeline",
                 "data validation assessment",
                 validation,
@@ -687,7 +696,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "🌐",
+                "[INFER]",
                 "Inference surface",
                 "adversarial robustness assessment",
                 adversarial,
@@ -1127,10 +1136,21 @@ def _find_related_finding(
     if isinstance(embedded, dict):
         return embedded
 
-    findings = (
-        result.get("report", {})
-        .get("findings", [])
-    ) or []
+    raw_findings = (
+        result.get("report", {}).get("findings")
+        or result.get("findings")
+        or result.get("vulnerability_findings")
+        or []
+    )
+    findings: List[Dict[str, Any]] = []
+    if isinstance(raw_findings, dict):
+        for val in raw_findings.values():
+            if isinstance(val, list):
+                findings.extend(val)
+            elif isinstance(val, dict):
+                findings.append(val)
+    elif isinstance(raw_findings, list):
+        findings = raw_findings
 
     node_text = " ".join(
         str(
@@ -1414,16 +1434,258 @@ def _compute_graph_positions(
     }
 
 
+def _infer_node_stage(node: Dict[str, Any]) -> int:
+    """Classifies a pipeline component into one of the 5 canonical lifecycle stages."""
+    if "stage_index" in node and isinstance(node["stage_index"], int):
+        return node["stage_index"]
+    node_type = str(node.get("type", "") or node.get("component_type", "")).lower()
+    name = str(node.get("name", "") or node.get("label", "")).lower()
+
+    if any(k in node_type or k in name for k in ["ingestion", "read_csv", "read_table", "open", "dataset", "input", "loader", "from_csv"]):
+        return 0
+    elif any(k in node_type or k in name for k in ["validation", "assert", "isinstance", "null", "check", "sanitize"]):
+        return 1
+    elif any(k in node_type or k in name for k in ["preprocess", "clean", "tokenize", "vectoriz", "transform", "scale", "encoder", "stem"]):
+        return 2
+    elif any(k in node_type or k in name for k in ["model", "train", "fit", "classifier", "regressor", "estimator", "bayes", "forest", "neural", "multinomial", "nb", "logistic", "svm", "svc", "tree", "gradient", "boost", "sgd"]):
+        return 3
+    elif any(k in node_type or k in name for k in ["infer", "predict", "evaluate", "score", "dump", "save", "persist", "output"]):
+        return 4
+    return 2
+
+
+STAGE_METADATA = {
+    0: {"name": "Data Ingestion", "pill": "INGESTION"},
+    1: {"name": "Validation & Hygiene", "pill": "VALIDATION"},
+    2: {"name": "Feature Engineering", "pill": "PREPROCESSING"},
+    3: {"name": "Model Architecture", "pill": "ESTIMATOR"},
+    4: {"name": "Inference & Output", "pill": "PERSISTENCE"},
+}
+
+
+def _render_streamlit_flow_dag(
+    nodes_data: List[Dict[str, Any]],
+    edges_data: List[Dict[str, Any]],
+    result: Dict[str, Any],
+    node_lookup: Dict[str, Dict[str, Any]],
+) -> Optional[str]:
+    """Renders the hierarchical DAG using React Flow with non-overlapping ManualLayout positions."""
+    # 1. Group nodes by lifecycle stage (0 to 4)
+    stage_groups: Dict[int, List[Dict[str, Any]]] = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for node in nodes_data:
+        stage_idx = _infer_node_stage(node)
+        stage_groups.setdefault(stage_idx, []).append(node)
+
+    # 2. Compute exact coordinates per stage column (ManualLayout prevents ELK animations)
+    col_x_map = {0: 40.0, 1: 340.0, 2: 640.0, 3: 940.0, 4: 1240.0}
+    max_count = max(len(grp) for grp in stage_groups.values()) if stage_groups else 1
+    y_pitch = 145.0
+
+    node_positions: Dict[str, Tuple[float, float]] = {}
+    for s_idx, grp in stage_groups.items():
+        col_x = col_x_map.get(s_idx, 640.0)
+        col_height = (len(grp) - 1) * y_pitch
+        max_height = (max_count - 1) * y_pitch
+        y_start = 30.0 + max(0.0, (max_height - col_height) / 2.0)
+        for idx_in_col, n in enumerate(grp):
+            node_positions[str(n.get("id", ""))] = (col_x, y_start + (idx_in_col * y_pitch))
+
+    flow_nodes: List[StreamlitFlowNode] = []
+
+    for node in nodes_data:
+        node_id = str(node.get("id", ""))
+        stage_idx = _infer_node_stage(node)
+        label = str(node.get("name", node.get("label", node_id)))
+        display_label = label if len(label) <= 28 else label[:25] + "…"
+        ast_type = node.get("ast_node_type") or node.get("ast_type") or "Component"
+        line_number = node.get("line_number") or node.get("lineno")
+
+        finding = _find_related_finding(result, node)
+
+        # Risk heatmap colors and pill: semi-see-through light grey before mapped, color-coded by severity when vulnerable
+        is_vulnerable = False
+        risk_score = 0.0
+        vuln_id = ""
+        test_status = ""
+
+        if finding:
+            risk_score = float(
+                finding.get(
+                    "risk_score",
+                    finding.get(
+                        "final_risk_score",
+                        finding.get("static_risk_score", 0.0),
+                    ),
+                )
+            )
+            vuln_id = str(finding.get("vulnerability_id", "RISK"))
+            test_status = str(finding.get("test_status", "")).lower()
+            if test_status == "vulnerable" or risk_score >= 4.0:
+                is_vulnerable = True
+
+        if is_vulnerable:
+            if risk_score >= 7.0 or test_status == "vulnerable":
+                border_color = "#ef4444"
+                bg_color = "rgba(239, 68, 68, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 0 16px rgba(239, 68, 68, 0.45)"
+            elif risk_score >= 4.0:
+                border_color = "#f59e0b"
+                bg_color = "rgba(245, 158, 11, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"WEAKNESS: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 0 12px rgba(245, 158, 11, 0.35)"
+            else:
+                border_color = "#3b82f6"
+                bg_color = "rgba(59, 130, 246, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"INFO: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 2px 8px rgba(59, 130, 246, 0.25)"
+        else:
+            # Semi-see-through and light grey before mapped to be vulnerable
+            border_color = "rgba(203, 213, 225, 0.30)"
+            bg_color = "rgba(241, 245, 249, 0.05)"
+            text_color = "#cbd5e1"
+            status_text = "BASELINE COMPONENT"
+            box_shadow = "0 2px 6px rgba(0, 0, 0, 0.15)"
+
+        stage_info = STAGE_METADATA.get(stage_idx, STAGE_METADATA[2])
+        line_part = f"L{line_number} · " if line_number else ""
+        content = (
+            f"**STAGE {stage_idx + 1}: {stage_info['pill']}**\n\n"
+            f"### `{display_label}`\n\n"
+            f"*{line_part}{ast_type}*\n\n"
+            f"`{status_text}`"
+        )
+
+        if stage_idx == 0:
+            node_type = "input"
+            source_pos = "right"
+            target_pos = "left"
+        elif stage_idx == 4:
+            node_type = "output"
+            source_pos = "right"
+            target_pos = "left"
+        else:
+            node_type = "default"
+            source_pos = "right"
+            target_pos = "left"
+
+        style = {
+            "background": bg_color,
+            "color": text_color,
+            "border": f"2px solid {border_color}",
+            "borderRadius": "10px",
+            "padding": "12px 14px",
+            "minWidth": "220px",
+            "maxWidth": "280px",
+            "boxShadow": box_shadow,
+            "fontSize": "12px",
+            "lineHeight": "1.4",
+            "textAlign": "left",
+        }
+
+        pos_xy = node_positions.get(node_id, (0.0, 0.0))
+
+        flow_nodes.append(
+            StreamlitFlowNode(
+                id=node_id,
+                pos=pos_xy,
+                data={"content": content},
+                node_type=node_type,
+                source_position=source_pos,
+                target_position=target_pos,
+                style=style,
+                draggable=True,
+                selectable=True,
+            )
+        )
+
+    flow_edges: List[StreamlitFlowEdge] = []
+    seen_edges = set()
+
+    for idx, edge in enumerate(edges_data):
+        src = str(edge.get("source", edge.get("from", "")))
+        dst = str(edge.get("target", edge.get("to", "")))
+        if not src or not dst or src == dst:
+            continue
+        edge_pair = (src, dst)
+        if edge_pair in seen_edges:
+            continue
+        seen_edges.add(edge_pair)
+
+        dst_node = node_lookup.get(dst, {})
+        dst_finding = _find_related_finding(result, dst_node)
+        if dst_finding and (
+            str(dst_finding.get("test_status", "")).lower() == "vulnerable"
+            or float(dst_finding.get("risk_score", dst_finding.get("final_risk_score", 0.0))) >= 7.0
+        ):
+            edge_color = "#ef4444"
+        else:
+            edge_color = "rgba(148, 163, 184, 0.35)"
+
+        flow_edges.append(
+            StreamlitFlowEdge(
+                id=f"e_{src}_{dst}_{idx}",
+                source=src,
+                target=dst,
+                edge_type="smoothstep",
+                animated=True,
+                style={"stroke": edge_color, "strokeWidth": 2.5},
+                marker_end={"type": "arrowclosed", "color": edge_color},
+            )
+        )
+
+    phase = "report" if ("report" in result and isinstance(result["report"], dict)) else "gate1"
+    cache_token = f"{phase}_{len(nodes_data)}_{len(edges_data)}_{abs(hash(tuple(str(n.get('id', '')) for n in nodes_data)))}"
+    state_key = f"_aegisml_flow_state_{cache_token}"
+    fitted_key = f"_aegisml_flow_fitted_{cache_token}"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = StreamlitFlowState(
+            nodes=flow_nodes,
+            edges=flow_edges,
+            timestamp=0,
+        )
+
+    flow_state = st.session_state[state_key]
+    should_fit = not st.session_state.get(fitted_key, False)
+
+    st.caption(
+        "Hierarchical Pipeline DAG · 5 Lifecycle Stages (Ingestion -> Validation -> Preprocessing -> Model -> Output) · "
+        "Drag, pan, or zoom canvas · Click any node to inspect its code and security context."
+    )
+
+    curr_state = streamlit_flow(
+        key=f"aegisml_pipeline_flow_{cache_token}",
+        state=flow_state,
+        height=560,
+        fit_view=should_fit,
+        show_controls=True,
+        show_minimap=False,
+        layout=ManualLayout(),
+        get_node_on_click=True,
+        hide_watermark=True,
+    )
+
+    if should_fit:
+        st.session_state[fitted_key] = True
+
+    return getattr(curr_state, "selected_id", None) if curr_state else None
+
+
 def render_interactive_pipeline_graph(
     result: Dict[str, Any],
 ) -> Optional[str]:
     """
-    Render the Agent 1 pipeline graph as an interactive NetworkX-backed graph.
+    Render the Agent 1 pipeline graph as a hierarchical DAG.
 
-    The graph uses deterministic 2D NetworkX positions instead of the narrow
-    hierarchical column that previously made the nodes look like a single line.
+    Uses Streamlit Flow (React Flow) with the Sugiyama layered layout algorithm
+    to organize components across the 5 pipeline lifecycle stages with zero overlap.
+    Falls back gracefully to NetworkX/agraph if React Flow is unavailable.
 
-    Clicking a node opens a code-inspection dialog containing:
+    Clicking a node displays an inline code inspection card containing:
     - component name/type
     - AST node type
     - source line
@@ -1448,344 +1710,174 @@ def render_interactive_pipeline_graph(
         or ""
     )
 
-    graph_positions = _compute_graph_positions(
-        nodes_data,
-        edges_data,
-    )
+    node_lookup: Dict[str, Dict[str, Any]] = {
+        str(n.get("id", "")): n for n in nodes_data if n.get("id")
+    }
 
-    graph_nodes: List[Node] = []
-    node_lookup: Dict[str, Dict[str, Any]] = {}
+    selected_id: Optional[str] = None
+    flow_rendered = False
 
-    transform_count = 0
-    for node in nodes_data:
-        node_id = str(
-            node.get(
-                "id",
-                "",
+    if HAS_STREAMLIT_FLOW:
+        try:
+            flow_selected = _render_streamlit_flow_dag(
+                nodes_data=nodes_data,
+                edges_data=edges_data,
+                result=result,
+                node_lookup=node_lookup,
             )
+            flow_rendered = True
+            if flow_selected:
+                selected_id = str(flow_selected)
+        except Exception:
+            flow_rendered = False
+
+    if not flow_rendered:
+        graph_positions = _compute_graph_positions(
+            nodes_data,
+            edges_data,
         )
 
-        node_lookup[node_id] = node
+        graph_nodes: List[Node] = []
+        transform_count = 0
+        for node in nodes_data:
+            node_id = str(node.get("id", ""))
+            finding = _find_related_finding(result, node)
+            line_number = node.get("line_number") or node.get("lineno") or node.get("line")
+            ast_type = node.get("ast_node_type") or node.get("ast_type") or "Pipeline component"
+            label = str(node.get("name", node.get("label", node_id)))
+            display_label = label if len(label) <= 30 else label[:27] + "..."
 
-        finding = _find_related_finding(
-            result,
-            node,
-        )
+            title_parts = [f"Component: {label}", f"AST: {ast_type}"]
+            if line_number:
+                title_parts.append(f"Line: {line_number}")
+            if finding:
+                title_parts.append(f"Risk: {finding.get('risk_score', 'N/A')}")
 
-        line_number = (
-            node.get("line_number")
-            or node.get("lineno")
-            or node.get("line")
-        )
-
-        ast_type = (
-            node.get("ast_node_type")
-            or node.get("ast_type")
-            or node.get("node_type")
-            or node.get("type")
-            or "Pipeline component"
-        )
-
-        label = str(
-            node.get(
-                "name",
-                node.get(
-                    "label",
-                    node_id,
-                ),
-            )
-        )
-
-        display_label = (
-            label
-            if len(label) <= 30
-            else label[:27] + "..."
-        )
-
-        title_parts = [
-            f"Component: {label}",
-            f"AST: {ast_type}",
-        ]
-
-        if line_number:
-            title_parts.append(
-                f"Line: {line_number}"
+            x_pos, y_pos = graph_positions.get(node_id, (0.0, 0.0))
+            graph_nodes.append(
+                Node(
+                    id=node_id,
+                    label=display_label,
+                    size=200,
+                    shape="box",
+                    color=_node_graph_color(node, finding),
+                    font={"color": "#ffffff", "size": 24},
+                    margin=16,
+                    x=x_pos,
+                    y=y_pos,
+                    fixed=True,
+                    title="\n".join(title_parts),
+                )
             )
 
-        if finding:
-            title_parts.append(
-                "Risk: "
-                f"{finding.get('risk_score', finding.get('final_risk_score', finding.get('static_risk_score', 'N/A')))}"
+        graph_edges: List[Edge] = []
+        for edge in edges_data:
+            graph_edges.append(
+                Edge(
+                    source=str(edge.get("source", "")),
+                    target=str(edge.get("target", "")),
+                    label=str(edge.get("label", "")),
+                    type="CURVE_SMOOTH",
+                    color="#d6a7a2",
+                    width=3.0,
+                )
             )
 
-        x_position, y_position = graph_positions.get(
-            node_id,
-            (
-                0.0,
-                0.0,
-            ),
-        )
-        if label == "transform":
-            transform_count += 1
-            if transform_count == 1:
-                x_position -= 120
-                y_position += 80
-
-            elif transform_count == 2:
-                x_position += 140
-                y_position -= 70
-        
-        graph_nodes.append(
-            Node(
-                id=node_id,
-                label=display_label,
-                size=250,
-                shape="box",
-                color=_node_graph_color(
-                    node,
-                    finding,
-                ),
-                font={
-                    "color": "#ffffff",
-                    "size": 42,
-                },
-                margin=24,
-                widthConstraint={
-                    "minimum": 210,
-                    "maximum": 360,
-                },
-                 x=x_position,
-                y=y_position,
-                fixed=True,
-                title="\n".join(
-                    title_parts
-                ),
-            )
+        config = Config(
+            width="100%",
+            height=560,
+            directed=True,
+            physics=False,
+            hierarchical=False,
+            nodeHighlightBehavior=True,
+            highlightColor="#f0c36d",
+            zoom=0.95,
         )
 
-    graph_edges: List[Edge] = []
-
-    for edge in edges_data:
-        graph_edges.append(
-            Edge(
-                source=str(
-                    edge.get(
-                        "source",
-                        "",
-                    )
-                ),
-                target=str(
-                    edge.get(
-                        "target",
-                        "",
-                    )
-                ),
-                label=str(
-                    edge.get(
-                        "label",
-                        "",
-                    )
-                ),
-                type="CURVE_SMOOTH",
-                color="#d6a7a2",
-                width=3.0,
-            )
+        st.caption(
+            "Interactive pipeline graph · use zoom/pan to explore · "
+            "click a node to inspect its source code and security context."
         )
 
-    config = Config(
-        width="100%",
-        height=620,
-        directed=True,
-        physics=False,
-        hierarchical=False,
-        nodeHighlightBehavior=True,
-        highlightColor="#f0c36d",
-        collapsible=False,
-        zoom=0.95,
-    )
-
-    st.caption(
-        "Interactive pipeline graph · use zoom/pan to explore · "
-        "click a node to inspect its source code and security context."
-    )
-
-    selected_node_id = agraph(
-        nodes=graph_nodes,
-        edges=graph_edges,
-        config=config,
-    )
-
-    if selected_node_id:
-        selected_id = str(
-            selected_node_id
+        selected_node_id = agraph(
+            nodes=graph_nodes,
+            edges=graph_edges,
+            config=config,
         )
+        if selected_node_id:
+            selected_id = str(selected_node_id)
 
-        node = node_lookup.get(
-            selected_id
-        )
+    # 3. Interactive Inspector Panel (works across both Streamlit Flow and fallback)
+    if selected_id and selected_id != st.session_state.get("_dismissed_pipeline_node"):
+        st.session_state["_active_pipeline_node"] = selected_id
 
+    active_id = st.session_state.get("_active_pipeline_node")
+    if active_id and active_id != st.session_state.get("_dismissed_pipeline_node"):
+        node = node_lookup.get(active_id)
         if node is not None:
-            # Display inline inspector below the graph if not dismissed
-            if selected_id != st.session_state.get("_dismissed_pipeline_node"):
-                st.session_state["_active_pipeline_node"] = selected_id
-                finding = _find_related_finding(
-                    result,
-                    node,
-                )
+            finding = _find_related_finding(result, node)
+            node_name = str(node.get("name", node.get("label", active_id)))
+            ast_type = (
+                node.get("ast_node_type")
+                or node.get("ast_type")
+                or node.get("node_type")
+                or node.get("type")
+                or "Unavailable"
+            )
+            component_type = (
+                node.get("component_type")
+                or node.get("category")
+                or node.get("component")
+                or "Pipeline component"
+            )
+            line_number = (
+                node.get("line_number")
+                or node.get("lineno")
+                or node.get("line")
+            )
 
-                node_name = str(
-                    node.get(
-                        "name",
-                        node.get(
-                            "label",
-                            selected_id,
-                        ),
+            with st.container(border=True):
+                header_col1, header_col2 = st.columns([5, 1])
+                with header_col1:
+                    st.markdown(f"#### Pipeline Node Inspector: `{node_name}`")
+                with header_col2:
+                    if st.button(
+                        "Close Inspector",
+                        key=f"close_node_inspector_{active_id}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["_dismissed_pipeline_node"] = active_id
+                        st.session_state["_active_pipeline_node"] = None
+                        st.rerun()
+
+                meta_col1, meta_col2, meta_col3 = st.columns(3)
+                meta_col1.metric("Component", str(component_type))
+                meta_col2.metric("AST node", str(ast_type))
+                meta_col3.metric("Source line", str(line_number) if line_number else "N/A")
+
+                st.markdown("##### Source context")
+                source_context = _extract_source_context(source_code, line_number)
+                st.code(source_context, language="python")
+
+                if finding:
+                    st.markdown("##### Related security finding")
+                    risk_col1, risk_col2, risk_col3 = st.columns(3)
+                    risk_col1.metric("Finding", str(finding.get("vulnerability_id", "N/A")))
+                    risk_col2.metric(
+                        "Risk score",
+                        f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10",
                     )
-                )
+                    risk_col3.metric("Status", str(finding.get("test_status", "not_tested")))
 
-                ast_type = (
-                    node.get("ast_node_type")
-                    or node.get("ast_type")
-                    or node.get("node_type")
-                    or node.get("type")
-                    or "Unavailable"
-                )
+                    st.write(finding.get("description", "No finding description is available."))
 
-                component_type = (
-                    node.get("component_type")
-                    or node.get("category")
-                    or node.get("component")
-                    or "Pipeline component"
-                )
+                    affected = finding.get("affected_components", [])
+                    if affected:
+                        st.caption("Affected components: " + ", ".join(str(item) for item in affected))
+                else:
+                    st.info("No report finding is directly mapped to this pipeline node.")
 
-                line_number = (
-                    node.get("line_number")
-                    or node.get("lineno")
-                    or node.get("line")
-                )
-
-                with st.container(border=True):
-                    header_col1, header_col2 = st.columns([5, 1])
-                    with header_col1:
-                        st.markdown(
-                            f"#### Pipeline Node Inspector: `{node_name}`"
-                        )
-                    with header_col2:
-                        if st.button(
-                            "Close Inspector",
-                            key=f"close_node_inspector_{selected_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state["_dismissed_pipeline_node"] = selected_id
-                            st.rerun()
-
-                    meta_col1, meta_col2, meta_col3 = (
-                        st.columns(3)
-                    )
-
-                    meta_col1.metric(
-                        "Component",
-                        str(
-                            component_type
-                        ),
-                    )
-
-                    meta_col2.metric(
-                        "AST node",
-                        str(
-                            ast_type
-                        ),
-                    )
-
-                    meta_col3.metric(
-                        "Source line",
-                        (
-                            str(
-                                line_number
-                            )
-                            if line_number
-                            else "N/A"
-                        ),
-                    )
-
-                    st.markdown(
-                        "##### Source context"
-                    )
-
-                    source_context = _extract_source_context(
-                        source_code,
-                        line_number,
-                    )
-
-                    st.code(
-                        source_context,
-                        language="python",
-                    )
-
-                    if finding:
-                        st.markdown(
-                            "##### Related security finding"
-                        )
-
-                        risk_col1, risk_col2, risk_col3 = (
-                            st.columns(3)
-                        )
-
-                        risk_col1.metric(
-                            "Finding",
-                            str(
-                                finding.get(
-                                    "vulnerability_id",
-                                    "N/A",
-                                )
-                            ),
-                        )
-
-                        risk_col2.metric(
-                            "Risk score",
-                            (
-                                f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
-                            ),
-                        )
-
-                        risk_col3.metric(
-                            "Status",
-                            str(
-                                finding.get(
-                                    "test_status",
-                                    "not_tested",
-                                )
-                            ),
-                        )
-
-                        st.write(
-                            finding.get(
-                                "description",
-                                "No finding description is available.",
-                            )
-                        )
-
-                        affected = finding.get(
-                            "affected_components",
-                            [],
-                        )
-
-                        if affected:
-                            st.caption(
-                                "Affected components: "
-                                + ", ".join(
-                                    str(item)
-                                    for item in affected
-                                )
-                            )
-
-                    else:
-                        st.info(
-                            "No report finding is directly mapped "
-                            "to this pipeline node."
-                        )
-
-        return selected_id
+            return active_id
 
     return None
 
@@ -1987,10 +2079,6 @@ def render_attack_strategy_gate(
     except Exception:
         completed_subtests = {}
 
-    st.markdown(
-        "## Gate 1 · Attack Strategy Review"
-    )
-
     if checkpoint_loaded:
         st.html(
             f"""
@@ -2168,6 +2256,7 @@ def render_attack_strategy_gate(
         st.session_state.audit_plan = None
         st.session_state.audit_id = None
         st.session_state.audit_result = None
+        st.session_state.audit_executing = False
         st.session_state.report_signed_off = False
         if "gate_1_confirmation" in st.session_state:
             del st.session_state["gate_1_confirmation"]

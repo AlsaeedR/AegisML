@@ -90,7 +90,8 @@ def is_final_audit_payload(
     if not isinstance(payload, dict):
         return False
 
-    if payload.get("status") != "awaiting_gate_2":
+    status = str(payload.get("status", "")).lower()
+    if status not in {"awaiting_gate_2", "completed", "signed_off"}:
         return False
 
     report = payload.get("report")
@@ -1346,6 +1347,8 @@ if "report_signed_off" not in st.session_state:
     st.session_state.report_signed_off = False
 if "show_docker_dialog" not in st.session_state:
     st.session_state.show_docker_dialog = False
+if "audit_executing" not in st.session_state:
+    st.session_state.audit_executing = False
 
 if st.session_state.get("show_docker_dialog", False):
     show_docker_unavailable_dialog()
@@ -1387,106 +1390,138 @@ if (
 # =========================================================
 
 if st.session_state.audit_result is None and st.session_state.audit_plan is not None:
-    is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
-    gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
+    is_executing = st.session_state.get("audit_executing", False)
 
+    if not is_executing:
+        is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
+        gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
+
+        st.html(
+            f"""
+            <div class="upload-hero">
+                <div class="upload-hero-left">
+                    <div class="upload-brand-row">
+                        <div class="upload-logo">A</div>
+                        <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                    </div>
+                    <p class="upload-hero-subtitle">
+                        Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                    </p>
+                </div>
+                <div class="upload-status-badge">{gate_badge}</div>
+            </div>
+            """
+        )
+
+        approved = render_attack_strategy_gate(st.session_state.audit_plan)
+
+        if approved:
+            if not check_docker_available():
+                st.session_state.show_docker_dialog = True
+                st.rerun()
+
+            st.session_state.audit_executing = True
+            remember_audit_resume_state(
+                st.session_state.audit_id,
+                "executing",
+            )
+            st.rerun()
+
+        st.stop()
+
+    # ---------------------------------------------------------
+    # Execution phase: Human-in-the-Loop banner is bypassed completely
+    # ---------------------------------------------------------
     st.html(
-        f"""
+        """
         <div class="upload-hero">
             <div class="upload-hero-left">
                 <div class="upload-brand-row">
                     <div class="upload-logo">A</div>
-                    <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                    <h1 class="upload-hero-title">Executing Security Audit</h1>
                 </div>
                 <p class="upload-hero-subtitle">
-                    Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                    Gate 1 approved. Running dynamic security tests and generating evidence-informed report...
                 </p>
             </div>
-            <div class="upload-status-badge">{gate_badge}</div>
+            <div class="upload-status-badge">DYNAMIC TESTS ACTIVE</div>
         </div>
         """
     )
 
-    render_interactive_pipeline_graph(st.session_state.audit_plan)
+    progress_placeholder = st.empty()
 
-    if render_attack_strategy_gate(st.session_state.audit_plan):
-        if not check_docker_available():
-            st.session_state.show_docker_dialog = True
-            st.rerun()
+    selected_tests = None
+    if isinstance(st.session_state.audit_plan, dict):
+        strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
+        selected_tests = strat_plan.get("selected_tests") or st.session_state.audit_plan.get("selected_tests")
 
-        remember_audit_resume_state(
-            st.session_state.audit_id,
-            "executing",
-        )
+    try:
+        with st.spinner(
+            "Running approved dynamic tests and evidence correlation..."
+        ):
+            response = run_approved_audit_with_progress(
+                st.session_state.audit_id,
+                progress_placeholder,
+                selected_tests=selected_tests,
+            )
 
-        progress_placeholder = st.empty()
+        if response.status_code == 200:
+            payload = response.json()
 
-        selected_tests = None
-        if isinstance(st.session_state.audit_plan, dict):
-            strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
-            selected_tests = strat_plan.get("selected_tests") or st.session_state.audit_plan.get("selected_tests")
-
-        try:
-            with st.spinner(
-                "Running approved dynamic tests and evidence correlation..."
+            if is_final_audit_payload(
+                payload
             ):
-                response = run_approved_audit_with_progress(
-                    st.session_state.audit_id,
-                    progress_placeholder,
-                    selected_tests=selected_tests,
-                )
-
-            if response.status_code == 200:
-                payload = response.json()
-
-                if is_final_audit_payload(
-                    payload
-                ):
-                    st.session_state.audit_result = payload
-                    st.session_state.audit_plan = None
-                    st.session_state.report_signed_off = False
-
-                    remember_audit_resume_state(
-                        st.session_state.audit_id,
-                        "report",
-                    )
-
-                    st.rerun()
-
-                else:
-                    st.warning(
-                        "The audit stopped before the final report was ready. "
-                        "No partial results were published. "
-                        "Your checkpoint is saved."
-                    )
-                    st.session_state.audit_plan = None
-                    st.rerun()
-
-            elif response.status_code == 409:
-                st.info(
-                    "This audit is already running. "
-                    "Wait for it to finish, then use Resume audit."
-                )
+                st.session_state.audit_result = payload
                 st.session_state.audit_plan = None
+                st.session_state.audit_executing = False
+                st.session_state.report_signed_off = False
+
+                remember_audit_resume_state(
+                    st.session_state.audit_id,
+                    "report",
+                )
+
                 st.rerun()
 
             else:
                 st.warning(
-                    "The audit was interrupted before completion. "
+                    "The audit stopped before the final report was ready. "
                     "No partial results were published. "
                     "Your checkpoint is saved."
                 )
                 st.session_state.audit_plan = None
+                st.session_state.audit_executing = False
                 st.rerun()
 
-        except requests.exceptions.RequestException:
+        elif response.status_code == 409:
+            st.info(
+                "This audit is already running. "
+                "Wait for it to finish, then use Resume audit."
+            )
+            st.session_state.audit_plan = None
+            st.session_state.audit_executing = False
+            st.rerun()
+
+        else:
             st.warning(
-                "The API connection was interrupted. "
+                "The audit was interrupted before completion. "
                 "No partial results were published. "
                 "Your checkpoint is saved."
             )
             st.session_state.audit_plan = None
+            st.session_state.audit_executing = False
             st.rerun()
+
+    except requests.exceptions.RequestException:
+        st.warning(
+            "The API connection was interrupted. "
+            "No partial results were published. "
+            "Your checkpoint is saved."
+        )
+        st.session_state.audit_plan = None
+        st.session_state.audit_executing = False
+        st.rerun()
 
     st.stop()
 
