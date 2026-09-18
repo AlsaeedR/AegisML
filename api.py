@@ -39,6 +39,7 @@ from src.agents.reporting_agent.reporting_agent import (
 from src.core.audit_memory import (
     load_session,
     save_session,
+    initialize_memory,
     StaleArtifactError,
     register_audit_artifacts,
     verify_artifact_integrity,
@@ -58,6 +59,11 @@ app = FastAPI(
     description="AI-powered ML pipeline security auditing API.",
     version="1.0.0",
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    initialize_memory()
 
 
 @app.exception_handler(StaleArtifactError)

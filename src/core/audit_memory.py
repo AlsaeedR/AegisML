@@ -5,11 +5,11 @@ import json
 import os
 import pickle
 import sqlite3
-import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +24,63 @@ class StaleArtifactError(RuntimeError):
     pass
 
 
-def _connect() -> sqlite3.Connection:
+def _init_tables(connection: sqlite3.Connection) -> None:
+    """Initializes all required SQLite schema tables with atomic transactions."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_sessions (
+            audit_id TEXT PRIMARY KEY,
+            session_blob BLOB NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_artifacts (
+            audit_id TEXT PRIMARY KEY,
+            code_hash TEXT,
+            model_hash TEXT,
+            dataset_hash TEXT,
+            registered_at TEXT
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_steps (
+            audit_id TEXT NOT NULL,
+            step_name TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            duration_seconds REAL,
+            step_blob BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (audit_id, step_name)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_subtests (
+            audit_id TEXT NOT NULL,
+            test_id TEXT NOT NULL,
+            status TEXT,
+            severity TEXT,
+            evidence_blob BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (audit_id, test_id)
+        )
+        """
+    )
+    connection.commit()
+
+
+@contextmanager
+def _connect() -> Generator[sqlite3.Connection, None, None]:
     MEMORY_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -35,72 +91,28 @@ def _connect() -> sqlite3.Connection:
         timeout=30,
         check_same_thread=False,
     )
-    # Enable WAL mode for high concurrency and resilience
-    connection.execute("PRAGMA journal_mode=WAL;")
-    connection.execute("PRAGMA synchronous=NORMAL;")
-    return connection
+    try:
+        # Enable WAL mode for high concurrency and resilience
+        connection.execute("PRAGMA journal_mode=WAL;")
+        connection.execute("PRAGMA synchronous=NORMAL;")
+
+        # Auto-initialize schema if database is newly created or missing tables
+        row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_artifacts' LIMIT 1;"
+        ).fetchone()
+        if row is None:
+            _init_tables(connection)
+
+        yield connection
+    finally:
+        connection.close()
 
 
 def initialize_memory() -> None:
     """Initializes all required SQLite schema tables with atomic transactions."""
     with _LOCK:
         with _connect() as connection:
-            # Table 1: Complete audit sessions (backward compatibility)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_sessions (
-                    audit_id TEXT PRIMARY KEY,
-                    session_blob BLOB NOT NULL,
-                    updated_at TEXT
-                )
-                """
-            )
-
-            # Table 2: Cryptographic artifact hashes for integrity verification
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_artifacts (
-                    audit_id TEXT PRIMARY KEY,
-                    code_hash TEXT,
-                    model_hash TEXT,
-                    dataset_hash TEXT,
-                    registered_at TEXT
-                )
-                """
-            )
-
-            # Table 3: Fine-grained step-level checkpoints
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_steps (
-                    audit_id TEXT NOT NULL,
-                    step_name TEXT NOT NULL,
-                    agent_name TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    duration_seconds REAL,
-                    step_blob BLOB NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (audit_id, step_name)
-                )
-                """
-            )
-
-            # Table 4: Dynamic testing sub-tests (V1, V2, V3, V4 individual results)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_subtests (
-                    audit_id TEXT NOT NULL,
-                    test_id TEXT NOT NULL,
-                    status TEXT,
-                    severity TEXT,
-                    evidence_blob BLOB NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (audit_id, test_id)
-                )
-                """
-            )
-
-            connection.commit()
+            _init_tables(connection)
 
 
 # =====================================================================
