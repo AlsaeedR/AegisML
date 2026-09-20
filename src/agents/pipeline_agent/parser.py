@@ -1,19 +1,6 @@
 import ast
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import networkx as nx
-
-NODE_TYPE_COLORS = {
-    "data_ingestion": "#B45309",
-    "preprocessing": "#2563EB",
-    "preprocessing_routine": "#3B82F6",
-    "model_training": "#7C3AED",
-    "training_routine": "#8B5CF6",
-    "inference": "#059669",
-    "validation": "#DC2626",
-    "persistence": "#4B5563",
-    "error": "#991B1B",
-    "unclassified": "#6B7280",
-}
 
 PIPELINE_STAGES = {
     "data_ingestion": {"stage_index": 0, "stage_name": "Data Ingestion", "icon": "input"},
@@ -423,7 +410,7 @@ def compute_layered_layout(
 
 
 def enrich_pipeline_graph_for_ui(pipeline_graph: Dict[str, Any]) -> Dict[str, Any]:
-    """Enriches pipeline nodes with stage classification, layout coordinates, and UI color metadata."""
+    """Enriches pipeline nodes with stage classification and layout coordinates."""
     graph = build_networkx_graph(pipeline_graph)
     layout = compute_layered_layout(graph)
     enriched_nodes: List[Dict[str, Any]] = []
@@ -440,7 +427,6 @@ def enrich_pipeline_graph_for_ui(pipeline_graph: Dict[str, Any]) -> Dict[str, An
             "level": coords["level"],
             "stage_index": stage_info["stage_index"],
             "stage_name": stage_info["stage_name"],
-            "color": NODE_TYPE_COLORS.get(node_type, NODE_TYPE_COLORS["unclassified"]),
         })
 
     return {
