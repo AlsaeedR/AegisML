@@ -1,9 +1,9 @@
-case_id,case_name,pipeline_file,loc,duration_seconds,speedup_vs_manual_pct,throughput_loc_per_min,cache_speedup_pct,cost_reduction_pct,llm_status,path_valid
-CASE-01,all_defended,pipeline.py,327,24.12,99.73,813.3,99.95,99.994,LLM is not available (Skipped),True
-CASE-02,v1_data_poisoning,train.py,76,8.22,99.91,555.0,99.91,99.994,LLM is not available (Skipped),True
-CASE-03,v2_preprocessing,pipeline.py,98,7.97,99.91,738.2,99.94,99.994,LLM is not available (Skipped),True
-CASE-04,v3_data_validation,main.py,229,9.83,99.89,1397.3,99.92,99.994,LLM is not available (Skipped),True
-CASE-05,v4_adversarial,main.py,374,9.51,99.89,2360.9,99.92,99.994,LLM is not available (Skipped),True
-CASE-06,v4_v1_compound,main.py,386,9.53,99.89,2429.4,99.92,99.994,LLM is not available (Skipped),True
-CASE-07,inference_only_serving,pipeline.py,21,7.77,99.91,162.1,99.88,99.994,LLM is not available (Skipped),True
-CASE-08,completely_unhardened_baseline,pipeline.py,35,8.0,99.91,262.6,99.91,99.994,LLM is not available (Skipped),True
+case_id,case_name,pipeline_file,loc,duration_seconds,speedup_vs_manual_pct,throughput_loc_per_min,cache_speedup_pct,prompt_tokens,completion_tokens,total_tokens,automated_cost_usd,cost_reduction_pct,a1_hallucination_pct,a1_control_recall_pct,a2_plan_coverage_pct,a2_budget_adherence_pct,a2_contradiction_pct,a3_scoring_integrity,a3_remediation_actionability_pct,trajectory_valid,llm_status
+CASE-01,all_defended,pipeline.py,327,65.39,99.27,300.0,99.99,56240,9079,65319,0.0139,99.9944,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-02,v1_data_poisoning,train.py,76,56.84,99.37,80.2,99.99,49447,8797,58244,0.0127,99.9949,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-03,v2_preprocessing,pipeline.py,98,58.7,99.35,100.2,99.99,44889,8379,53268,0.0118,99.9953,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-04,v3_data_validation,main.py,229,84.63,99.06,162.4,99.99,80249,11569,91818,0.019,99.9924,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-05,v4_adversarial,main.py,374,71.01,99.21,316.0,99.99,86379,10349,96728,0.0192,99.9923,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-06,v4_v1_compound,main.py,386,75.37,99.16,307.3,99.99,86983,10452,97435,0.0193,99.9923,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-07,inference_only_serving,pipeline.py,21,18.72,99.79,67.3,99.97,21113,2987,24100,0.005,99.998,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM
+CASE-08,completely_unhardened_baseline,pipeline.py,35,7.68,99.91,273.3,99.94,9983,1024,11007,0.0021,99.9992,0.0,100.0,100.0,100.0,0.0,True,100.0,True,Evaluated with live LLM

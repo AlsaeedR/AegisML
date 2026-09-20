@@ -13,6 +13,20 @@ def is_llm_available() -> bool:
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
+_GLOBAL_CALLBACKS = []
+
+
+def register_global_callback(callback) -> None:
+    """Register a global callback handler (e.g. TokenUsageTracker) for all get_llm instances."""
+    if callback not in _GLOBAL_CALLBACKS:
+        _GLOBAL_CALLBACKS.append(callback)
+
+
+def clear_global_callbacks() -> None:
+    """Clear all registered global callback handlers."""
+    _GLOBAL_CALLBACKS.clear()
+
+
 def get_llm(
     temperature: float = 0.2,
     model_name: Optional[str] = None,
@@ -47,8 +61,11 @@ def get_llm(
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    resolved_callbacks = list(_GLOBAL_CALLBACKS)
     if callbacks is not None:
-        kwargs["callbacks"] = callbacks
+        resolved_callbacks.extend(callbacks)
+    if resolved_callbacks:
+        kwargs["callbacks"] = resolved_callbacks
 
     return ChatOpenAI(**kwargs)
 

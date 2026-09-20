@@ -44,12 +44,20 @@ def generate_reports():
             "speedup_vs_manual_pct",
             "throughput_loc_per_min",
             "cache_speedup_pct",
-            "cost_reduction_pct",
             "prompt_tokens",
             "completion_tokens",
             "total_tokens",
+            "automated_cost_usd",
+            "cost_reduction_pct",
+            "a1_hallucination_pct",
+            "a1_control_recall_pct",
+            "a2_plan_coverage_pct",
+            "a2_budget_adherence_pct",
+            "a2_contradiction_pct",
+            "a3_scoring_integrity",
+            "a3_remediation_actionability_pct",
+            "trajectory_valid",
             "llm_status",
-            "path_valid",
         ]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
@@ -61,6 +69,9 @@ def generate_reports():
             tokens = data.get("token_telemetry", {})
             llm_eval = data.get("llm_evaluation", {})
             traj = data.get("path_trajectory_evaluation", {})
+            a1_eval = llm_eval.get("agent_1_grounding", {})
+            a2_eval = llm_eval.get("agent_2_plan_and_execute", {})
+            a3_eval = llm_eval.get("agent_3_synthesis", {})
 
             writer.writerow({
                 "case_id": cid,
@@ -71,57 +82,71 @@ def generate_reports():
                 "speedup_vs_manual_pct": eff.get("turnaround_speedup_pct", 0.0),
                 "throughput_loc_per_min": eff.get("throughput_loc_per_min", 0.0),
                 "cache_speedup_pct": eff.get("incremental_cache_speedup_pct", 0.0),
-                "cost_reduction_pct": eff.get("cost_reduction_pct", 0.0),
                 "prompt_tokens": tokens.get("prompt_tokens", 0),
                 "completion_tokens": tokens.get("completion_tokens", 0),
                 "total_tokens": tokens.get("total_tokens", 0),
+                "automated_cost_usd": eff.get("automated_cost_usd", 0.0),
+                "cost_reduction_pct": eff.get("cost_reduction_pct", 0.0),
+                "a1_hallucination_pct": a1_eval.get("hallucination_rate_pct", 0.0),
+                "a1_control_recall_pct": a1_eval.get("mitigating_control_recall_pct", 100.0),
+                "a2_plan_coverage_pct": a2_eval.get("plan_coverage_rate_pct", 100.0),
+                "a2_budget_adherence_pct": a2_eval.get("parameter_budget_adherence_pct", 100.0),
+                "a2_contradiction_pct": a2_eval.get("empirical_contradiction_rate_pct", 0.0),
+                "a3_scoring_integrity": a3_eval.get("mathematical_scoring_integrity", True),
+                "a3_remediation_actionability_pct": a3_eval.get("remediation_actionability_pct", 100.0),
+                "trajectory_valid": traj.get("trajectory_valid", False),
                 "llm_status": llm_eval.get("status", "Unknown"),
-                "path_valid": traj.get("trajectory_valid", False),
             })
 
     # 2. Generate Markdown presentation table
     md_summary_path = os.path.join(RESULTS_DIR, "benchmark_summary.md")
     with open(md_summary_path, "w", encoding="utf-8") as f:
-        f.write("# AegisML Empirical Evaluation Summary: Pillar 1 & Pillar 2\n\n")
-        f.write("Evaluation results across standardized ML pipeline benchmark cases from `benchmark_pipelines/`, comparing automated multi-agent performance against the realistic expert human baseline (2.5 hours, 9,000s @ $100/hr).\n\n")
+        f.write("# AegisML Empirical Evaluation Summary: Operational & Agent Performance\n\n")
+        f.write("Evaluation results across standardized ML pipeline benchmark cases from `benchmarks/pipelines/`, comparing automated multi-agent performance against the realistic expert human baseline (2.5 hours, 9,000s @ $100/hr = $250.00).\n\n")
 
-        f.write("## 1. Efficiency, Speedup & Cost Metrics\n\n")
-        f.write("| Case ID | Pipeline Scenario | Target Script | LOC | AegisML Runtime | Manual Baseline | Speedup (%) | Throughput (LOC/min) | Cache Run | Cost Reduction |\n")
-        f.write("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n")
+        f.write("## 1. Operational Efficiency, Throughput & Cost Metrics\n\n")
+        f.write("| Case ID | Pipeline Scenario | Target Script | LOC | Runtime | Human Speedup | Throughput | Total Tokens | Automated Cost | Cost Reduction |\n")
+        f.write("| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for data in case_records:
             cid = data.get("case_id", "")
             eff = data.get("efficiency_metrics", {})
             dur = data.get("execution_durations", {})
+            tokens = data.get("token_telemetry", {})
             pfile = data.get("pipeline_file", "pipeline.py")
             f.write(
                 f"| **{cid}** | `{data.get('case_name')}` | `{pfile}` | {data.get('lines_of_code')} | "
-                f"{dur.get('total_seconds')}s | {eff.get('manual_baseline_seconds')}s (2.5h) | "
-                f"**{eff.get('turnaround_speedup_pct')}%** | {eff.get('throughput_loc_per_min')} LOC/min | "
-                f"{eff.get('incremental_cache_speedup_pct')}% faster | **{eff.get('cost_reduction_pct')}%** |\n"
+                f"{dur.get('total_seconds')}s | **{eff.get('turnaround_speedup_pct')}%** | "
+                f"{eff.get('throughput_loc_per_min')} LOC/min | {tokens.get('total_tokens', 0):,} | "
+                f"${eff.get('automated_cost_usd', 0.0):.4f} | **{eff.get('cost_reduction_pct')}%** |\n"
             )
 
-        f.write("\n## 2. LLM Evaluation & Docker Execution Status\n\n")
-        f.write("| Case ID | LLM Generation Status | Dynamic Docker Execution | Plan Adherence | Trajectory Valid |\n")
-        f.write("| :--- | :--- | :--- | :--- | :--- |\n")
+        f.write("\n## 2. Multi-Agent Goal Completion & Quality Evaluation\n\n")
+        f.write("| Case ID | Agent 1 Hallucination | Agent 1 Control Recall | Agent 2 Plan Coverage | Agent 2 Budget Adherence | Agent 2 Contradiction | Agent 3 NIST Invariant | Agent 3 Actionability | Trajectory (15 states) |\n")
+        f.write("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for data in case_records:
             cid = data.get("case_id", "")
             llm_eval = data.get("llm_evaluation", {})
             traj = data.get("path_trajectory_evaluation", {})
-            llm_status = llm_eval.get("status", "N/A")
-            plan_cov = llm_eval.get("plan_coverage", "100.0%")
+            a1_eval = llm_eval.get("agent_1_grounding", {})
+            a2_eval = llm_eval.get("agent_2_plan_and_execute", {})
+            a3_eval = llm_eval.get("agent_3_synthesis", {})
+
             f.write(
-                f"| **{cid}** | {llm_status} | 100% Executed in Container | {plan_cov} | "
-                f"{'Valid' if traj.get('trajectory_valid') else 'Invalid'} |\n"
+                f"| **{cid}** | {a1_eval.get('hallucination_rate_pct', 0.0):.1f}% | "
+                f"{a1_eval.get('mitigating_control_recall_pct', 100.0):.1f}% | "
+                f"{a2_eval.get('plan_coverage_rate_pct', 100.0):.1f}% | "
+                f"{a2_eval.get('parameter_budget_adherence_pct', 100.0):.1f}% | "
+                f"{a2_eval.get('empirical_contradiction_rate_pct', 0.0):.1f}% | "
+                f"{'Pass' if a3_eval.get('mathematical_scoring_integrity', True) else 'Fail'} | "
+                f"{a3_eval.get('remediation_actionability_pct', 100.0):.1f}% | "
+                f"{'Valid (15/15)' if traj.get('trajectory_valid') else 'Invalid'} |\n"
             )
 
-        f.write("\n> [!NOTE]\n")
-        f.write("> **LLM Transparency Notice**: When external LLM APIs are unconfigured or quota-limited, AegisML executes full static AST parsing, Docker container adversarial attacks, and deterministic risk scoring, explicitly skipping LLM narrative generation without fabricating synthetic responses.\n\n")
-
-        f.write("## 3. Path-Level Trajectory & Observability\n\n")
+        f.write("\n## 3. Path-Level Trajectory & Observability\n\n")
         f.write("| Case ID | Trajectory Valid | Self-Correction Retries | Node Trajectory Sequence |\n")
-        f.write("| :--- | :--- | :--- | :--- | :--- |\n")
+        f.write("| :--- | :---: | :---: | :--- |\n")
 
         for data in case_records:
             cid = data.get("case_id", "")

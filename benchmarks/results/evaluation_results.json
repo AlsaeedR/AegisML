@@ -2,47 +2,93 @@
   {
     "case_id": "CASE-01",
     "case_name": "all_defended",
-    "audit_id": "bench_CASE-01_3e928b04",
+    "audit_id": "bench_CASE-01_6edbd062",
     "lines_of_code": 327,
     "pipeline_file": "pipeline.py",
     "execution_durations": {
-      "total_seconds": 24.12,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 24.07,
-      "agent_3_seconds": 0.03,
-      "warm_cache_seconds": 0.01
+      "total_seconds": 65.39,
+      "agent_1_seconds": 25.55,
+      "agent_2_seconds": 32.87,
+      "agent_3_seconds": 6.97,
+      "warm_cache_seconds": 0.0
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.73,
-      "throughput_loc_per_min": 813.3,
-      "incremental_cache_speedup_pct": 99.95,
+      "turnaround_speedup_pct": 99.27,
+      "throughput_loc_per_min": 300.0,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0139,
+      "cost_reduction_pct": 99.9944
+    },
+    "token_telemetry": {
+      "prompt_tokens": 56240,
+      "completion_tokens": 9079,
+      "total_tokens": 65319,
+      "total_cost_usd": 0.013883
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.007,
-        "execute_dynamic_sandbox": 24.052,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 9.311,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 6.961,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.004,
+        "reason_strategy": 7.93,
+        "execute_sandbox": 14.938,
+        "forensic_diagnosis": 9.922,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.003,
+        "synthesize_audit_report": 6.924,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 24.052
       }
     },
     "docker_available": true
@@ -50,47 +96,93 @@
   {
     "case_id": "CASE-02",
     "case_name": "v1_data_poisoning",
-    "audit_id": "bench_CASE-02_03c2354b",
+    "audit_id": "bench_CASE-02_f74e93ce",
     "lines_of_code": 76,
     "pipeline_file": "train.py",
     "execution_durations": {
-      "total_seconds": 8.22,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 8.17,
-      "agent_3_seconds": 0.03,
+      "total_seconds": 56.84,
+      "agent_1_seconds": 21.88,
+      "agent_2_seconds": 25.0,
+      "agent_3_seconds": 9.96,
       "warm_cache_seconds": 0.01
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.91,
-      "throughput_loc_per_min": 555.0,
-      "incremental_cache_speedup_pct": 99.91,
+      "turnaround_speedup_pct": 99.37,
+      "throughput_loc_per_min": 80.2,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0127,
+      "cost_reduction_pct": 99.9949
+    },
+    "token_telemetry": {
+      "prompt_tokens": 49447,
+      "completion_tokens": 8797,
+      "total_tokens": 58244,
+      "total_cost_usd": 0.012695
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.004,
-        "execute_dynamic_sandbox": 8.14,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 7.787,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 5.722,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.005,
+        "reason_strategy": 8.88,
+        "execute_sandbox": 4.428,
+        "forensic_diagnosis": 11.618,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.004,
+        "synthesize_audit_report": 9.907,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 8.14
       }
     },
     "docker_available": true
@@ -98,47 +190,93 @@
   {
     "case_id": "CASE-03",
     "case_name": "v2_preprocessing",
-    "audit_id": "bench_CASE-03_75949061",
+    "audit_id": "bench_CASE-03_7335ab9c",
     "lines_of_code": 98,
     "pipeline_file": "pipeline.py",
     "execution_durations": {
-      "total_seconds": 7.97,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 7.89,
-      "agent_3_seconds": 0.05,
-      "warm_cache_seconds": 0.01
+      "total_seconds": 58.7,
+      "agent_1_seconds": 25.33,
+      "agent_2_seconds": 25.01,
+      "agent_3_seconds": 8.37,
+      "warm_cache_seconds": 0.0
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.91,
-      "throughput_loc_per_min": 738.2,
-      "incremental_cache_speedup_pct": 99.94,
+      "turnaround_speedup_pct": 99.35,
+      "throughput_loc_per_min": 100.2,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0118,
+      "cost_reduction_pct": 99.9953
+    },
+    "token_telemetry": {
+      "prompt_tokens": 44889,
+      "completion_tokens": 8379,
+      "total_tokens": 53268,
+      "total_cost_usd": 0.011761
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.004,
-        "execute_dynamic_sandbox": 7.861,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 9.245,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 7.429,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.012,
+        "reason_strategy": 10.658,
+        "execute_sandbox": 2.893,
+        "forensic_diagnosis": 11.375,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.003,
+        "synthesize_audit_report": 8.323,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 7.861
       }
     },
     "docker_available": true
@@ -146,47 +284,93 @@
   {
     "case_id": "CASE-04",
     "case_name": "v3_data_validation",
-    "audit_id": "bench_CASE-04_1b9ac884",
+    "audit_id": "bench_CASE-04_3cb99497",
     "lines_of_code": 229,
     "pipeline_file": "main.py",
     "execution_durations": {
-      "total_seconds": 9.83,
-      "agent_1_seconds": 0.05,
-      "agent_2_seconds": 9.74,
-      "agent_3_seconds": 0.03,
-      "warm_cache_seconds": 0.01
+      "total_seconds": 84.63,
+      "agent_1_seconds": 41.33,
+      "agent_2_seconds": 34.24,
+      "agent_3_seconds": 9.06,
+      "warm_cache_seconds": 0.0
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.89,
-      "throughput_loc_per_min": 1397.3,
-      "incremental_cache_speedup_pct": 99.92,
+      "turnaround_speedup_pct": 99.06,
+      "throughput_loc_per_min": 162.4,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.019,
+      "cost_reduction_pct": 99.9924
+    },
+    "token_telemetry": {
+      "prompt_tokens": 80249,
+      "completion_tokens": 11569,
+      "total_tokens": 91818,
+      "total_cost_usd": 0.018979
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.008,
-        "execute_dynamic_sandbox": 9.715,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 12.07,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 8.596,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.003,
+        "reason_strategy": 12.15,
+        "execute_sandbox": 8.017,
+        "forensic_diagnosis": 14.001,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.003,
+        "synthesize_audit_report": 9.015,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 9.715
       }
     },
     "docker_available": true
@@ -194,47 +378,93 @@
   {
     "case_id": "CASE-05",
     "case_name": "v4_adversarial",
-    "audit_id": "bench_CASE-05_f1416d41",
+    "audit_id": "bench_CASE-05_e96f963a",
     "lines_of_code": 374,
     "pipeline_file": "main.py",
     "execution_durations": {
-      "total_seconds": 9.51,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 9.46,
-      "agent_3_seconds": 0.03,
+      "total_seconds": 71.01,
+      "agent_1_seconds": 30.46,
+      "agent_2_seconds": 31.16,
+      "agent_3_seconds": 9.39,
       "warm_cache_seconds": 0.01
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.89,
-      "throughput_loc_per_min": 2360.9,
-      "incremental_cache_speedup_pct": 99.92,
+      "turnaround_speedup_pct": 99.21,
+      "throughput_loc_per_min": 316.0,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0192,
+      "cost_reduction_pct": 99.9923
+    },
+    "token_telemetry": {
+      "prompt_tokens": 86379,
+      "completion_tokens": 10349,
+      "total_tokens": 96728,
+      "total_cost_usd": 0.019166
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.009,
-        "execute_dynamic_sandbox": 9.435,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 9.903,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 8.79,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.003,
+        "reason_strategy": 12.453,
+        "execute_sandbox": 3.743,
+        "forensic_diagnosis": 14.888,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.003,
+        "synthesize_audit_report": 9.345,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 9.435
       }
     },
     "docker_available": true
@@ -242,47 +472,93 @@
   {
     "case_id": "CASE-06",
     "case_name": "v4_v1_compound",
-    "audit_id": "bench_CASE-06_2f7c6b40",
+    "audit_id": "bench_CASE-06_28d16828",
     "lines_of_code": 386,
     "pipeline_file": "main.py",
     "execution_durations": {
-      "total_seconds": 9.53,
-      "agent_1_seconds": 0.05,
-      "agent_2_seconds": 9.46,
-      "agent_3_seconds": 0.02,
-      "warm_cache_seconds": 0.01
+      "total_seconds": 75.37,
+      "agent_1_seconds": 35.05,
+      "agent_2_seconds": 31.47,
+      "agent_3_seconds": 8.84,
+      "warm_cache_seconds": 0.0
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.89,
-      "throughput_loc_per_min": 2429.4,
-      "incremental_cache_speedup_pct": 99.92,
+      "turnaround_speedup_pct": 99.16,
+      "throughput_loc_per_min": 307.3,
+      "incremental_cache_speedup_pct": 99.99,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0193,
+      "cost_reduction_pct": 99.9923
+    },
+    "token_telemetry": {
+      "prompt_tokens": 86983,
+      "completion_tokens": 10452,
+      "total_tokens": 97435,
+      "total_cost_usd": 0.019319
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.021,
-        "execute_dynamic_sandbox": 9.443,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 13.234,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 9.03,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.003,
+        "reason_strategy": 13.847,
+        "execute_sandbox": 4.128,
+        "forensic_diagnosis": 13.429,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.004,
+        "synthesize_audit_report": 8.789,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 9.443
       }
     },
     "docker_available": true
@@ -290,47 +566,93 @@
   {
     "case_id": "CASE-07",
     "case_name": "inference_only_serving",
-    "audit_id": "bench_CASE-07_dcc491d1",
+    "audit_id": "bench_CASE-07_6929627b",
     "lines_of_code": 21,
     "pipeline_file": "pipeline.py",
     "execution_durations": {
-      "total_seconds": 7.77,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 7.73,
-      "agent_3_seconds": 0.02,
+      "total_seconds": 18.72,
+      "agent_1_seconds": 0.06,
+      "agent_2_seconds": 0.09,
+      "agent_3_seconds": 0.04,
       "warm_cache_seconds": 0.01
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
-      "turnaround_speedup_pct": 99.91,
-      "throughput_loc_per_min": 162.1,
-      "incremental_cache_speedup_pct": 99.88,
+      "turnaround_speedup_pct": 99.79,
+      "throughput_loc_per_min": 67.3,
+      "incremental_cache_speedup_pct": 99.97,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.005,
+      "cost_reduction_pct": 99.998
+    },
+    "token_telemetry": {
+      "prompt_tokens": 21113,
+      "completion_tokens": 2987,
+      "total_tokens": 24100,
+      "total_cost_usd": 0.004959
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 2,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.001,
-        "execute_dynamic_sandbox": 7.709,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 6.662,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 5.218,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.09,
+        "reason_strategy": 3.568,
+        "execute_sandbox": 0.0,
+        "forensic_diagnosis": 3.321,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.004,
+        "synthesize_audit_report": 5.79,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 7.709
       }
     },
     "docker_available": true
@@ -338,47 +660,93 @@
   {
     "case_id": "CASE-08",
     "case_name": "completely_unhardened_baseline",
-    "audit_id": "bench_CASE-08_e2b0a03b",
+    "audit_id": "bench_CASE-08_ac83511d",
     "lines_of_code": 35,
     "pipeline_file": "pipeline.py",
     "execution_durations": {
-      "total_seconds": 8.0,
-      "agent_1_seconds": 0.02,
-      "agent_2_seconds": 7.96,
-      "agent_3_seconds": 0.02,
-      "warm_cache_seconds": 0.01
+      "total_seconds": 7.68,
+      "agent_1_seconds": 7.54,
+      "agent_2_seconds": 0.1,
+      "agent_3_seconds": 0.04,
+      "warm_cache_seconds": 0.0
     },
     "efficiency_metrics": {
       "manual_baseline_seconds": 9000.0,
       "turnaround_speedup_pct": 99.91,
-      "throughput_loc_per_min": 262.6,
-      "incremental_cache_speedup_pct": 99.91,
+      "throughput_loc_per_min": 273.3,
+      "incremental_cache_speedup_pct": 99.94,
       "manual_cost_usd": 250.0,
-      "automated_cost_usd": 0.015,
-      "cost_reduction_pct": 99.994
+      "automated_cost_usd": 0.0021,
+      "cost_reduction_pct": 99.9992
+    },
+    "token_telemetry": {
+      "prompt_tokens": 9983,
+      "completion_tokens": 1024,
+      "total_tokens": 11007,
+      "total_cost_usd": 0.002112
     },
     "llm_evaluation": {
-      "status": "LLM is not available (Skipped)",
-      "reason": "OpenAI API quota exceeded (HTTP 429).",
-      "hallucination_rate": "N/A (LLM unavailable)",
-      "plan_coverage": "100.0% (Docker dispatch)",
-      "scoring_integrity": true
+      "status": "Evaluated with live LLM",
+      "agent_1_grounding": {
+        "hallucination_rate_pct": 0.0,
+        "referenced_symbols_count": 0,
+        "hallucinated_symbols_count": 0,
+        "mitigating_control_recall_pct": 100.0,
+        "total_findings_count": 4
+      },
+      "agent_2_plan_and_execute": {
+        "plan_coverage_rate_pct": 100.0,
+        "planned_tests_count": 4,
+        "executed_tests_count": 4,
+        "parameter_budget_adherence_pct": 100.0,
+        "empirical_contradiction_rate_pct": 0.0,
+        "telemetry_contradictions_count": 0
+      },
+      "agent_3_synthesis": {
+        "mathematical_scoring_integrity": true,
+        "actionable_remediations_count": 0,
+        "total_remediations_count": 0,
+        "remediation_actionability_pct": 100.0
+      }
     },
     "path_trajectory_evaluation": {
       "trajectory_path": [
         "extract_pipeline",
-        "execute_dynamic_sandbox",
-        "synthesize_findings",
-        "export_report"
+        "reason_threat_model",
+        "validate_threat_model",
+        "reason_vulnerabilities",
+        "validate_vulnerabilities",
+        "finalize_agent_results",
+        "prepare_metadata",
+        "reason_strategy",
+        "execute_sandbox",
+        "forensic_diagnosis",
+        "aggregate_results",
+        "correlate_findings",
+        "synthesize_audit_report",
+        "validate_audit_report",
+        "finalize_report"
       ],
       "invalid_transition_count": 0,
       "trajectory_valid": true,
       "self_correction_retries": 0,
       "step_latencies_seconds": {
         "extract_pipeline": 0.003,
-        "execute_dynamic_sandbox": 7.934,
-        "synthesize_findings": 0.0,
-        "export_report": 0.01
+        "reason_threat_model": 5.851,
+        "validate_threat_model": 0.0,
+        "reason_vulnerabilities": 7.47,
+        "validate_vulnerabilities": 0.0,
+        "finalize_agent_results": 0.0,
+        "prepare_metadata": 0.093,
+        "reason_strategy": 3.054,
+        "execute_sandbox": 0.0,
+        "forensic_diagnosis": 3.193,
+        "aggregate_results": 0.0,
+        "correlate_findings": 0.018,
+        "synthesize_audit_report": 6.083,
+        "validate_audit_report": 0.0,
+        "finalize_report": 0.0,
+        "execute_dynamic_sandbox": 7.934
       }
     },
     "docker_available": true

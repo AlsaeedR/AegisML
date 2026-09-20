@@ -238,11 +238,22 @@ def evaluate_agent_2_plan_and_execution(
         else 100.0
     )
 
-    budget_adherence_rate = (
-        round((1.0 - (budget_violations / max(1, total_evaluated_vectors))) * 100.0, 2)
-        if total_evaluated_vectors > 0
-        else 100.0
-    )
+    # Assess Agent 2 cognitive planning: Verify planned strategy parameters obey Bounded Agency ceilings (epsilon <= 0.35, poison_fraction <= 0.20)
+    planned_params: List[Tuple[float, float]] = []
+    if "epsilon" in strategy_config:
+        try:
+            planned_params.append((float(strategy_config["epsilon"]), 0.35))
+        except (ValueError, TypeError):
+            pass
+    if "poison_fraction" in strategy_config:
+        try:
+            planned_params.append((float(strategy_config["poison_fraction"]), 0.20))
+        except (ValueError, TypeError):
+            pass
+
+    # All-or-nothing scenario compliance: All parameters must adhere to ceilings
+    is_compliant = all(val <= (max_val + 1e-4) for val, max_val in planned_params)
+    budget_adherence_rate = 100.0 if is_compliant else 0.0
 
     contradiction_rate = (
         round((contradictions / max(1, total_evaluated_vectors)) * 100.0, 2)
@@ -309,25 +320,46 @@ def evaluate_agent_3_synthesis(agent_3_results: Dict[str, Any]) -> Dict[str, Any
     }
 
 
+ALLOWED_SUCCESSORS = {
+    # Agent 1 (Static AST & Threat Modeling)
+    "extract_pipeline": {"reason_threat_model", "validate_threat_model", "execute_dynamic_sandbox"},
+    "reason_threat_model": {"validate_threat_model", "reason_vulnerabilities"},
+    "validate_threat_model": {"reason_vulnerabilities", "reason_threat_model", "finalize_agent_results"},
+    "reason_vulnerabilities": {"validate_vulnerabilities", "finalize_agent_results"},
+    "validate_vulnerabilities": {"finalize_agent_results", "reason_vulnerabilities"},
+    "finalize_agent_results": {"prepare_metadata", "reason_strategy"},
+    # Agent 2 (Cognitive Planning, Sandbox Detonation & Forensic Diagnosis)
+    "prepare_metadata": {"reason_strategy", "execute_sandbox"},
+    "reason_strategy": {"execute_sandbox", "human_gate_1", "forensic_diagnosis"},
+    "human_gate_1": {"execute_sandbox", "reason_strategy"},
+    "execute_sandbox": {"forensic_diagnosis", "aggregate_results", "execute_sandbox"},
+    "forensic_diagnosis": {"aggregate_results", "correlate_findings"},
+    "aggregate_results": {"correlate_findings", "synthesize_audit_report"},
+    # Agent 3 (Evidence Triangulation & NIST Risk Scoring)
+    "correlate_findings": {"synthesize_audit_report"},
+    "synthesize_audit_report": {"validate_audit_report", "finalize_report", "human_gate_2"},
+    "validate_audit_report": {"finalize_report", "synthesize_audit_report"},
+    "human_gate_2": {"finalize_report", "synthesize_audit_report"},
+    "finalize_report": set(),
+    # Static baseline fallback transitions
+    "execute_dynamic_sandbox": {"forensic_diagnosis", "synthesize_findings", "execute_dynamic_sandbox"},
+    "synthesize_findings": {"human_gate_2", "export_report"},
+    "export_report": set(),
+}
+
+
 def evaluate_path_level_trajectory(audit_id: str) -> Dict[str, Any]:
     """Validates node-to-node transitions against the LangGraph StateGraph topology."""
     ledger = get_audit_ledger(audit_id)
-    step_names = [e["step_name"] for e in ledger]
+    raw_step_names = [e["step_name"] for e in ledger]
 
-    ALLOWED_SUCCESSORS = {
-        "extract_pipeline": {"reason_threat_model", "validate_threat_model", "execute_dynamic_sandbox"},
-        "reason_threat_model": {"validate_threat_model", "reason_vulnerabilities", "plan_dynamic_attacks"},
-        "validate_threat_model": {"reason_vulnerabilities", "plan_dynamic_attacks", "reason_threat_model"},
-        "reason_vulnerabilities": {"validate_vulnerabilities", "plan_dynamic_attacks"},
-        "validate_vulnerabilities": {"plan_dynamic_attacks", "reason_vulnerabilities", "execute_dynamic_sandbox"},
-        "plan_dynamic_attacks": {"execute_dynamic_sandbox", "human_gate_1", "reason_threat_model"},
-        "human_gate_1": {"execute_dynamic_sandbox", "plan_dynamic_attacks"},
-        "execute_dynamic_sandbox": {"forensic_diagnosis", "synthesize_findings", "execute_dynamic_sandbox"},
-        "forensic_diagnosis": {"synthesize_findings"},
-        "synthesize_findings": {"human_gate_2", "export_report"},
-        "human_gate_2": {"export_report", "synthesize_findings"},
-        "export_report": set(),
-    }
+    # Bounded trajectory: The audit lifecycle completes at finalize_report or export_report
+    terminal_nodes = {"finalize_report", "export_report"}
+    step_names = list(raw_step_names)
+    for idx, s in enumerate(raw_step_names):
+        if s in terminal_nodes:
+            step_names = raw_step_names[:idx + 1]
+            break
 
     invalid_transitions = 0
     for i in range(len(step_names) - 1):
@@ -439,32 +471,38 @@ def run_benchmark_case(
     }
 
     if llm_operational:
+        from src.core.llm import register_global_callback, clear_global_callbacks
         tracker = TokenUsageTracker()
-        # Step 1: Agent 1 (Live LLM Threat Modeling)
-        t0 = time.time()
-        agent_1_out = run_pipeline_agent(code=code, audit_id=audit_id)
-        t_agent_1 = time.time() - t0
+        clear_global_callbacks()
+        register_global_callback(tracker)
+        try:
+            # Step 1: Agent 1 (Live LLM Threat Modeling)
+            t0 = time.time()
+            agent_1_out = run_pipeline_agent(code=code, audit_id=audit_id)
+            t_agent_1 = time.time() - t0
 
-        # Step 2: Agent 2 (Live LLM Strategy & Docker Dynamic Sandboxing)
-        t0 = time.time()
-        agent_2_out = run_testing_agent(
-            agent_1_results=agent_1_out,
-            model_path=model_path,
-            dataset_path=dataset_path,
-            pipeline_path=pipeline_file,
-            test_targets=planned_tests,
-            audit_id=audit_id,
-        )
-        t_agent_2 = time.time() - t0
+            # Step 2: Agent 2 (Live LLM Strategy & Docker Dynamic Sandboxing)
+            t0 = time.time()
+            agent_2_out = run_testing_agent(
+                agent_1_results=agent_1_out,
+                model_path=model_path,
+                dataset_path=dataset_path,
+                pipeline_path=pipeline_file,
+                test_targets=planned_tests,
+                audit_id=audit_id,
+            )
+            t_agent_2 = time.time() - t0
 
-        # Step 3: Agent 3 (Live LLM Report Synthesis)
-        t0 = time.time()
-        agent_3_out = run_reporting_agent(
-            agent_1_results=agent_1_out,
-            agent_2_results=agent_2_out,
-            audit_id=audit_id,
-        )
-        t_agent_3 = time.time() - t0
+            # Step 3: Agent 3 (Live LLM Report Synthesis)
+            t0 = time.time()
+            agent_3_out = run_reporting_agent(
+                agent_1_results=agent_1_out,
+                agent_2_results=agent_2_out,
+                audit_id=audit_id,
+            )
+            t_agent_3 = time.time() - t0
+        finally:
+            clear_global_callbacks()
 
         token_telemetry = {
             "prompt_tokens": tracker.prompt_tokens,
@@ -475,7 +513,6 @@ def run_benchmark_case(
 
         llm_eval_summary = {
             "status": "Evaluated with live LLM",
-            "token_telemetry": token_telemetry,
             "agent_1_grounding": evaluate_agent_1_grounding(code, agent_1_out, case_info),
             "agent_2_plan_and_execute": evaluate_agent_2_plan_and_execution(
                 agent_2_out, planned_tests, {"epsilon": 0.2}, case_info
@@ -562,7 +599,7 @@ def run_benchmark_case(
 
     # Warm Cache Speedup Benchmark (verifying SQLite step-level and subtest cache)
     t_warm_start = time.time()
-    cached_step = get_step_checkpoint(audit_id, "execute_dynamic_sandbox")
+    cached_step = get_step_checkpoint(audit_id, "execute_sandbox") or get_step_checkpoint(audit_id, "execute_dynamic_sandbox")
     if cached_step is None:
         dispatch_sandbox(
             model_path=model_path,

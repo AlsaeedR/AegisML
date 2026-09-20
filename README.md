@@ -391,7 +391,7 @@ The benchmark harness generates empirical telemetry in [`benchmarks/results/`](b
 | Metric | Measured Automated Result | Human Engineering Baseline | Improvement |
 | :--- | :---: | :---: | :---: |
 | **Audit Turnaround Time** | **10.62 seconds** *(avg)* | 9,000.0s (2.5 hours) | **99.88% speedup** |
-| **Audit Cost per Pipeline** | **~$0.015** | $250.00 ($100/hr) | **99.99% cost reduction** |
+| **Audit Cost per Pipeline** | **~$0.013 USD** (62,240 tokens + container) | $250.00 ($100/hr) | **99.995% cost reduction** |
 | **Warm-Cache Audit Latency** | **<0.01 seconds** | 10.62s cold audit | **99.92% speedup** |
 | **Path Trajectory Validity** | **100.0%** (0 invalid transitions) | N/A | **Deterministic safety** |
 | **Automated Throughput** | **1,090.0 LOC / minute** *(avg)* | ~2.5 LOC / minute | **436x throughput increase** |
