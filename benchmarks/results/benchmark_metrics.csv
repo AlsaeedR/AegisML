@@ -1,0 +1,9 @@
+case_id,case_name,pipeline_file,loc,duration_seconds,speedup_vs_manual_pct,throughput_loc_per_min,cache_speedup_pct,cost_reduction_pct,llm_status,path_valid
+CASE-01,all_defended,pipeline.py,327,24.12,99.73,813.3,99.95,99.994,LLM is not available (Skipped),True
+CASE-02,v1_data_poisoning,train.py,76,8.22,99.91,555.0,99.91,99.994,LLM is not available (Skipped),True
+CASE-03,v2_preprocessing,pipeline.py,98,7.97,99.91,738.2,99.94,99.994,LLM is not available (Skipped),True
+CASE-04,v3_data_validation,main.py,229,9.83,99.89,1397.3,99.92,99.994,LLM is not available (Skipped),True
+CASE-05,v4_adversarial,main.py,374,9.51,99.89,2360.9,99.92,99.994,LLM is not available (Skipped),True
+CASE-06,v4_v1_compound,main.py,386,9.53,99.89,2429.4,99.92,99.994,LLM is not available (Skipped),True
+CASE-07,inference_only_serving,pipeline.py,21,7.77,99.91,162.1,99.88,99.994,LLM is not available (Skipped),True
+CASE-08,completely_unhardened_baseline,pipeline.py,35,8.0,99.91,262.6,99.91,99.994,LLM is not available (Skipped),True

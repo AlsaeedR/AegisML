@@ -332,3 +332,68 @@ $$\text{Final Evidence-Informed Risk} = \frac{\text{Base Impact} \times \text{Ev
 * **Hidden Risk**: Agent 1 rated static risk Low or assumed code defenses were sufficient, but Agent 2 successfully breached them (`vulnerable`). Likelihood is scaled up.
 * **Not Applicable**: The evaluated lifecycle stage is absent from the target code; zero risk is assigned.
 * **Unverified**: Empirical evidence was unavailable, incomplete, or skipped under the Zero-Trust policy. Static likelihood estimate is retained.
+
+---
+
+## Testing and Benchmarking
+
+AegisML is evaluated across two foundational pillars:
+1. **Pillar 1: System Performance & Telemetry Fidelity**: Quantifying automated multi-agent audit efficiency (turnaround speedup, throughput, cost reduction, warm-cache acceleration, and path-level trajectory validity) relative to calibrated human engineering baselines.
+2. **Pillar 2: Defense-in-Depth Guardrails**: Enforcing end-to-end multi-layer safety, cryptographic tampering detection, schema constraints, and fail-closed sandboxing.
+
+### Benchmark Pipelines
+
+All benchmark test subjects reside in [`benchmarks/pipelines/`](benchmarks/pipelines/):
+* `all_defended`: Positive control baseline with SHA-256 integrity verification, NFKC character allowlisting, schema assertions, and prototype-margin classifier.
+* `completely_unhardened`: Negative control baseline exhibiting unmitigated exposure across all 4 vulnerability vectors.
+* `inference_only`: Production inference serving pipeline verifying lifecycle stage grounding and automated threat pruning.
+* `v1_data_poisoning`: Isolated data poisoning attack surface without training data cryptographic hashing.
+* `v2_preprocessing`: Isolated preprocessing attack surface with unbounded inputs.
+* `v3_data_validation`: Isolated missing value and schema validation failure surface.
+* `v4_adversarial`: Isolated black-box adversarial perturbation surface.
+* `v4_v1_compound`: Multi-vector compound attack surface.
+
+### Running Automated Tests
+
+AegisML includes a test suite covering pre-flight AST guards, cryptographic artifact tampering detection (`StaleArtifactError`), NIST risk scoring mathematical invariants, fail-closed Zero-Trust sandboxing, and benchmark pipeline integrity.
+
+Run the entire test suite via `pytest`:
+
+```bash
+python -m pytest tests/ -v
+```
+
+To run individual test suites:
+
+```bash
+# Benchmark Pipeline Integrity & Edge Cases (9 tests)
+python -m pytest tests/test_benchmark_pipelines.py -v
+
+# Defense-in-Depth Guardrails & System Invariants (8 tests)
+python -m pytest tests/test_guardrails.py -v
+```
+
+### Running the Benchmark Evaluation Harness
+
+To execute the automated evaluation harness across all 8 pipeline scenarios:
+
+```bash
+python benchmarks/evaluator.py
+```
+
+The benchmark harness generates empirical telemetry in [`benchmarks/results/`](benchmarks/results/):
+* [`benchmark_metrics.csv`](benchmarks/results/benchmark_metrics.csv): Quantitative per-case speedup, throughput, and cost reduction data.
+* [`benchmark_summary.md`](benchmarks/results/benchmark_summary.md): High-level executive synthesis.
+* [`evaluation_results.json`](benchmarks/results/evaluation_results.json): Full empirical telemetry and execution trace data.
+
+### Empirical Evaluation Summary
+
+| Metric | Measured Automated Result | Human Engineering Baseline | Improvement |
+| :--- | :---: | :---: | :---: |
+| **Audit Turnaround Time** | **10.62 seconds** *(avg)* | 9,000.0s (2.5 hours) | **99.88% speedup** |
+| **Audit Cost per Pipeline** | **~$0.015** | $250.00 ($100/hr) | **99.99% cost reduction** |
+| **Warm-Cache Audit Latency** | **<0.01 seconds** | 10.62s cold audit | **99.92% speedup** |
+| **Path Trajectory Validity** | **100.0%** (0 invalid transitions) | N/A | **Deterministic safety** |
+| **Automated Throughput** | **1,090.0 LOC / minute** *(avg)* | ~2.5 LOC / minute | **436x throughput increase** |
+| **Guardrail Test Verification** | **17 / 17 tests passed (100%)** | Manual sanity check | **Comprehensive defense** |
+

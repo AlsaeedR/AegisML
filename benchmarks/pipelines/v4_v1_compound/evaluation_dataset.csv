@@ -1,0 +1,31 @@
+text,label
+"The dashboard is clean, fast, and very useful for business reporting.",positive
+"The model gave accurate results and helped the team make better decisions.",positive
+"I really liked the simple interface and the clear analysis summary.",positive
+"The pipeline processed the data correctly and saved a lot of manual effort.",positive
+"The recommendation output was relevant and easy to interpret.",positive
+"The application was reliable, responsive, and easy to use.",positive
+"The analysis helped identify important customer trends quickly.",positive
+"The automated report reduced repetitive work for the team.",positive
+"The system performance improved after the optimization update.",positive
+"The visualizations made the insights clear for non-technical stakeholders.",positive
+"The service was slow, confusing, and difficult to use.",negative
+"The model produced inconsistent predictions and missed several key cases.",negative
+"The dashboard failed to load and the charts were not helpful.",negative
+"The pipeline broke during preprocessing and created incorrect outputs.",negative
+"The documentation was unclear and made setup frustrating.",negative
+"The results were inaccurate and did not match the expected labels.",negative
+"The interface was cluttered and the workflow felt unreliable.",negative
+"The report had missing values, wrong metrics, and poor formatting.",negative
+"The system crashed repeatedly during testing.",negative
+"The analysis did not provide useful business insights.",negative
+"The report was generated successfully but needs further review.",neutral
+"The model completed training and produced average results.",neutral
+"The dashboard contains basic charts for initial exploration.",neutral
+"The pipeline ran without errors on the sample dataset.",neutral
+"The output is acceptable but could be improved with more data.",neutral
+"The application includes standard functionality for text analysis.",neutral
+"The classification results are reasonable for a baseline model.",neutral
+"The current workflow supports simple experimentation.",neutral
+"The project demonstrates the main steps of an NLP pipeline.",neutral
+"The dataset is small but sufficient for a reproducible demo.",neutral

@@ -17,6 +17,7 @@ def get_llm(
     temperature: float = 0.2,
     model_name: Optional[str] = None,
     max_tokens: Optional[int] = None,
+    callbacks: Optional[list] = None,
 ) -> ChatOpenAI:
     """
     Centralized factory for initializing LangChain ChatOpenAI instances across all agents.
@@ -25,6 +26,7 @@ def get_llm(
         temperature: Sampling temperature (e.g. 0.0 for deterministic planning, 0.2 for narrative).
         model_name: Optional model override. Defaults to OPENAI_MODEL_NAME or 'gpt-5.4-mini'.
         max_tokens: Optional token generation limit.
+        callbacks: Optional list of LangChain callback handlers for token/telemetry tracking.
         
     Returns:
         Configured ChatOpenAI client.
@@ -45,6 +47,8 @@ def get_llm(
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    if callbacks is not None:
+        kwargs["callbacks"] = callbacks
 
     return ChatOpenAI(**kwargs)
 
