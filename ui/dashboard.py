@@ -2011,11 +2011,23 @@ def _strategy_test_rows(
         or []
     )
 
+    # Build an ordered list of tests to display: proposed tests plus any added by reviewer
+    items_to_display: List[Any] = list(selected_tests)
+    existing_ids = {
+        item if isinstance(item, str) else str(item.get("test_id") or item.get("name") or "")
+        for item in items_to_display
+    }
+    if selected_test_ids:
+        for user_tid in selected_test_ids:
+            if user_tid not in existing_ids:
+                items_to_display.append(user_tid)
+                existing_ids.add(user_tid)
+
     rows: List[Dict[str, str]] = []
     selected_set = set(selected_test_ids) if selected_test_ids is not None else None
     mem_subtests = completed_subtests or {}
 
-    for item in selected_tests:
+    for item in items_to_display:
         if isinstance(item, dict):
             test_id = (
                 item.get("test_id")
@@ -2171,8 +2183,15 @@ def render_attack_strategy_gate(
         )
 
     # -------------------------------------------------------------
-    # Step 1 — Test selection (strictly Agent 2's proposed tests)
+    # Step 1 — Test selection (Agent 2 recommendations + full suite)
     # -------------------------------------------------------------
+    ALL_DYNAMIC_TESTS = [
+        "V1_poisoning",
+        "V4_adversarial",
+        "V2_preprocessing",
+        "V3_validation",
+    ]
+
     raw_proposed = (
         plan.get("selected_tests")
         or plan.get("planned_tests")
@@ -2185,31 +2204,37 @@ def render_attack_strategy_gate(
     ]
     proposed_test_ids = [t for t in proposed_test_ids if t]
 
+    # Combine canonical dynamic tests with any custom tests formulated by Agent 2
+    all_available_options: List[str] = list(ALL_DYNAMIC_TESTS)
+    for tid in proposed_test_ids:
+        if tid not in all_available_options:
+            all_available_options.append(tid)
+
     st.markdown(
         '<div class="step-heading"><span class="step-num">01</span>Select tests to authorize</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="step-caption">Only tests mapped to components detected in your '
-        'pipeline can run. Select at least one.</div>',
+        '<div class="step-caption">Agent 2 has recommended tests based on static analysis. '
+        'You can authorize, deselect, or add any dynamic tests below. Select at least one.</div>',
         unsafe_allow_html=True,
     )
 
-    multiselect_key = "gate1_selected_tests_multiselect_v5"
+    multiselect_key = "gate1_selected_tests_multiselect_v6"
     if multiselect_key not in st.session_state:
         st.session_state[multiselect_key] = list(proposed_test_ids)
 
-    # Ensure selection stays strictly within Agent 2's proposed tests
-    sanitized_selection = [t for t in st.session_state[multiselect_key] if t in proposed_test_ids]
-    if not sanitized_selection and proposed_test_ids and multiselect_key not in st.session_state:
+    # Ensure selection stays valid within all available options
+    sanitized_selection = [t for t in st.session_state[multiselect_key] if t in all_available_options]
+    if not sanitized_selection and proposed_test_ids:
         sanitized_selection = list(proposed_test_ids)
 
     user_selected_tests = st.multiselect(
         "Authorized dynamic tests for container sandbox:",
-        options=proposed_test_ids,
+        options=all_available_options,
         default=sanitized_selection,
         format_func=lambda tid: _resolve_test_metadata(tid, plan, result)[0],
-        help="Only tests formulated by Agent 2 for your pipeline can be selected. You must select at least 1 test.",
+        help="Select dynamic penetration tests to authorize for execution in the container sandbox. You can add tests beyond Agent 2's recommendations.",
         key=multiselect_key,
         label_visibility="collapsed",
     )
@@ -2267,7 +2292,7 @@ def render_attack_strategy_gate(
     # function cannot be reused by Streamlit. The label must be identical
     # in both branches below — changing it while keeping the same key would
     # cause Streamlit to reattach the widget to an old element-tree slot.
-    approval_key = "gate_1_confirmation_v5"
+    approval_key = "gate_1_confirmation_v6"
     has_valid_selection = len(user_selected_tests) >= 1
 
     CHECKBOX_LABEL = (
@@ -2308,18 +2333,22 @@ def render_attack_strategy_gate(
             "gate_1_confirmation_v3",
             "gate_1_confirmation_v4",
             "gate_1_confirmation_v5",
+            "gate_1_confirmation_v6",
             "gate1_selected_tests_multiselect",
             "gate1_selected_tests_multiselect_v3",
             "gate1_selected_tests_multiselect_v4",
             "gate1_selected_tests_multiselect_v5",
+            "gate1_selected_tests_multiselect_v6",
             "gate_1_approve",
             "gate_1_approve_v3",
             "gate_1_approve_v4",
             "gate_1_approve_v5",
+            "gate_1_approve_v6",
             "gate_1_reject",
             "gate_1_reject_v3",
             "gate_1_reject_v4",
             "gate_1_reject_v5",
+            "gate_1_reject_v6",
         ):
             if stale_key in st.session_state:
                 del st.session_state[stale_key]
@@ -2336,14 +2365,14 @@ def render_attack_strategy_gate(
             type="primary",
             use_container_width=True,
             disabled=not approved or not has_valid_selection,
-            key="gate_1_approve_v5",
+            key="gate_1_approve_v6",
         )
 
     with reject_col:
         st.button(
             "Reject & return to upload",
             use_container_width=True,
-            key="gate_1_reject_v5",
+            key="gate_1_reject_v6",
             on_click=on_gate_1_reject,
         )
 

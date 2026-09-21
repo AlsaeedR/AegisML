@@ -434,10 +434,10 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
         res = {
             "sandbox_status": "executed",
             "sandbox_telemetry": {"duration_seconds": 0.0, "cached": True},
-            "poisoning_evidence": cached_subtests.get("V1_poisoning", {}),
-            "adversarial_evidence": cached_subtests.get("V4_adversarial", {}),
-            "preprocessing_evidence": cached_subtests.get("V2_preprocessing", {}),
-            "validation_evidence": cached_subtests.get("V3_validation", {}),
+            "poisoning_evidence": cached_subtests.get("V1_poisoning", {}) if "V1_poisoning" in planned_tests else {},
+            "adversarial_evidence": cached_subtests.get("V4_adversarial", {}) if "V4_adversarial" in planned_tests else {},
+            "preprocessing_evidence": cached_subtests.get("V2_preprocessing", {}) if "V2_preprocessing" in planned_tests else {},
+            "validation_evidence": cached_subtests.get("V3_validation", {}) if "V3_validation" in planned_tests else {},
             "execution_plan_log": log,
         }
         if not has_step_completed(audit_id, "execute_sandbox"):
@@ -488,11 +488,11 @@ def node_execute_sandbox(state: TestingAgentState) -> Dict[str, Any]:
     if audit_id:
         invalidate_post_gate1_steps(audit_id)
 
-    # Merge cached and freshly executed evidence
-    final_poisoning = sandbox_result.get("poisoning_evidence") or cached_subtests.get("V1_poisoning", {})
-    final_adversarial = sandbox_result.get("adversarial_evidence") or cached_subtests.get("V4_adversarial", {})
-    final_preprocessing = sandbox_result.get("preprocessing_evidence") or cached_subtests.get("V2_preprocessing", {})
-    final_validation = sandbox_result.get("validation_evidence") or cached_subtests.get("V3_validation", {})
+    # Merge cached and freshly executed evidence strictly for authorized planned tests
+    final_poisoning = (sandbox_result.get("poisoning_evidence") or cached_subtests.get("V1_poisoning", {})) if "V1_poisoning" in planned_tests else {}
+    final_adversarial = (sandbox_result.get("adversarial_evidence") or cached_subtests.get("V4_adversarial", {})) if "V4_adversarial" in planned_tests else {}
+    final_preprocessing = (sandbox_result.get("preprocessing_evidence") or cached_subtests.get("V2_preprocessing", {})) if "V2_preprocessing" in planned_tests else {}
+    final_validation = (sandbox_result.get("validation_evidence") or cached_subtests.get("V3_validation", {})) if "V3_validation" in planned_tests else {}
 
     publish(audit_id, {
         "event": "agent_step_finished",
