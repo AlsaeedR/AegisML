@@ -389,7 +389,10 @@ body {
     align-items: center;
     justify-content: center;
 
-    font-size: 17px;
+    font-size: 18px;
+    line-height: 1;
+    user-select: none;
+    overflow: hidden;
 }
 
 .node-name {
@@ -894,6 +897,32 @@ div[data-testid="stFileUploaderDropzone"] button:hover {
     background: #fafaf7 !important;
 }
 
+/* Single-file uploaders do not need an add-another-file control. */
+div[data-testid="stFileUploaderDropzone"]:has([data-testid="stFileUploaderFileName"]) :is(button, [role="button"]):not([aria-label="Remove"]):not([aria-label="Delete"]) {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    opacity: 0 !important;
+}
+
+/* Streamlit versions render the add control with different icon markup. */
+div[data-testid="stFileUploaderDropzone"] span[aria-hidden="true"],
+div[data-testid="stFileUploaderDropzone"] svg,
+div[data-testid="stFileUploaderDropzone"] [data-testid="stElementToolbar"] {
+    display: none !important;
+}
+
+div[data-testid="stFileUploaderDropzone"] button[aria-label="Remove"] svg,
+div[data-testid="stFileUploaderDropzone"] button[aria-label="Delete"] svg {
+    display: block !important;
+}
+
 div[data-testid="stTextInput"] input {
     background: #ffffff !important;
     border: 1px solid #d9dad4 !important;
@@ -943,6 +972,16 @@ div[data-testid="stExpander"] summary {
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--card);
+}
+
+.agent-progress-active {
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e6e7e1;
+    color: var(--gold);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 .agent-progress-heading {
@@ -1019,4 +1058,81 @@ div[data-testid="stExpander"] summary {
 
 .agent-progress-status.running {
     color: var(--gold);
+}
+
+/* =========================================================
+   ENHANCEMENT PASS · finding cards, empty states, step headers
+   ========================================================= */
+
+/* Severity left-stripe so findings are scannable without reading the pill */
+.finding-card {
+    position: relative;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.finding-card:hover {
+    border-color: #b8baa9;
+    box-shadow: 0 4px 18px rgba(48, 52, 44, 0.06);
+}
+
+.finding-card[data-sev="critical"] { border-left: 3px solid #9c4b40; }
+.finding-card[data-sev="high"]     { border-left: 3px solid #a27d31; }
+.finding-card[data-sev="medium"]   { border-left: 3px solid #b8994a; }
+.finding-card[data-sev="low"]      { border-left: 3px solid #4f775b; }
+.finding-card[data-sev="na"]       { border-left: 3px solid #d9dad4; }
+
+/* Animated risk ring: background transitions when a new score is applied */
+.risk-ring {
+    transition: background 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Controls-outcome helper classes (replaces inline styles in dashboard.py) */
+.controls-verified    { color: #15803d; }
+.controls-partial     { color: #0284c7; }
+.controls-bypassed    { color: #c2410c; }
+.controls-ineffective { color: #64748b; }
+
+/* Empty state for the findings column */
+.finding-empty {
+    padding: 40px 24px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    background: #fbfbf8;
+    color: var(--muted);
+    text-align: center;
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+.finding-empty strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--dark);
+    font-size: 15px;
+    font-weight: 650;
+}
+
+/* Numbered step headers used inside Gate 1 */
+.step-heading {
+    margin: 22px 0 6px;
+    color: var(--dark);
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -0.1px;
+}
+
+.step-heading .step-num {
+    display: inline-block;
+    min-width: 18px;
+    margin-right: 8px;
+    color: #9a9c95;
+    font-family: monospace;
+    font-weight: 700;
+}
+
+.step-caption {
+    margin-bottom: 12px;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.55;
 }

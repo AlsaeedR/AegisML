@@ -955,6 +955,17 @@ def execute_planned_audit(
             session
         )
 
+        publish(
+            audit_id,
+            {
+                "event": "agent_step_finished",
+                "agent": "Agent 2",
+                "step": "Forensic diagnosis",
+                "status": "completed",
+                "message": "Dynamic evidence passed to Agent 3 for reporting.",
+            },
+        )
+
         # -------------------------------------------------
         # Agent 3 - Evidence-informed reporting
         # -------------------------------------------------

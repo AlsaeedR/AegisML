@@ -93,6 +93,16 @@ def severity_class(
     return "severity-low"
 
 
+def severity_slug(
+    severity: str,
+) -> str:
+    """Return a stable data-attribute slug for finding-card striping."""
+    normalized = str(severity or "").strip().lower()
+    if normalized in {"critical", "high", "medium", "low"}:
+        return normalized
+    return "na"
+
+
 def risk_fill_class(score: int) -> str:
     """Map the shared AegisML severity thresholds to dashboard bar classes."""
     if score >= 50:
@@ -235,6 +245,14 @@ def finding_card(
         final_severity
     )
 
+    # Left-edge stripe slug: prefers the Not-Applicable neutral grey when
+    # the correlation status removes the finding from the risk scale.
+    card_stripe_slug = (
+        "na"
+        if display_severity == "Not Applicable"
+        else severity_slug(final_severity)
+    )
+
     category = finding.get(
         "category",
         "Security finding",
@@ -348,28 +366,28 @@ def finding_card(
         controls_str = ", ".join(mitigating_controls)
         if control_verdict == "verified_effective" or "mitigated" in correlation_lower or "defended" in correlation_lower:
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #15803d;">
+            <div class="finding-meta controls-verified">
                 verified active controls:
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif control_verdict == "partially_effective":
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #0284c7;">
+            <div class="finding-meta controls-partial">
                 partially active controls (mitigated major failure):
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif control_verdict == "bypassed" or ("hidden risk" in correlation_lower and final_severity.lower() in ["critical", "high"]):
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #c2410c;">
+            <div class="finding-meta controls-bypassed">
                 bypassed controls (failed under penetration testing):
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif "confirmed" in correlation_lower or status.lower() == "vulnerable":
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #64748b;">
+            <div class="finding-meta controls-ineffective">
                 ineffective checks observed in code:
                 {escape(controls_str)}
             </div>
@@ -402,7 +420,7 @@ def finding_card(
         right_box_class = "suggested-fix"
 
     return f"""
-    <div class="finding-card">
+    <div class="finding-card" data-sev="{card_stripe_slug}">
 
         <div class="finding-head">
 
@@ -672,7 +690,7 @@ def render_dashboard(
     pipeline_html = "".join(
         [
             pipeline_node(
-                "[INGEST]",
+                "📥",
                 "Data ingestion",
                 "data poisoning assessment",
                 poisoning,
@@ -680,7 +698,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "[PREP]",
+                "🧹",
                 "Preprocessing",
                 "preprocessing assessment",
                 preprocessing,
@@ -688,7 +706,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "[MODEL]",
+                "🧠",
                 "ML pipeline",
                 "data validation assessment",
                 validation,
@@ -696,7 +714,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "[INFER]",
+                "🎯",
                 "Inference surface",
                 "adversarial robustness assessment",
                 adversarial,
@@ -714,8 +732,9 @@ def render_dashboard(
 
     if not findings_html:
         findings_html = """
-        <div class="finding-card">
-            No security findings were generated.
+        <div class="finding-empty">
+            <strong>No security findings were generated.</strong>
+            Every detected surface passed the theoretical and dynamic assessment.
         </div>
         """
 
@@ -926,6 +945,7 @@ def render_dashboard(
         return content_html
 
     return summary_html + content_html
+
 
 # =========================================================
 # HUMAN-IN-THE-LOOP REMEDIATION UI
@@ -1348,60 +1368,31 @@ def _node_graph_color(
     return "#667064"
 
 
-
-def _compute_graph_positions(
-    nodes_data: List[Dict[str, Any]],
-    edges_data: List[Dict[str, Any]],
+@st.cache_data(show_spinner=False)
+def _compute_graph_positions_cached(
+    node_ids: Tuple[str, ...],
+    edge_pairs: Tuple[Tuple[str, str], ...],
 ) -> Dict[str, Tuple[float, float]]:
     """
-    Compute stable, readable 2D positions for the interactive graph.
-
-    The previous hierarchical layout compressed a mostly sequential AST graph
-    into a narrow vertical column. NetworkX spring_layout spreads connected
-    nodes across the available canvas while keeping the same result stable
-    between reruns.
+    Cache-safe wrapper around the spring layout. Accepts tuples so
+    Streamlit can hash the arguments. Avoids recomputing a 500-iteration
+    spring layout on every rerun for an unchanged pipeline graph.
     """
 
     graph = nx.DiGraph()
 
-    for node in nodes_data:
-        node_id = str(
-            node.get(
-                "id",
-                "",
-            )
-        )
-
+    for node_id in node_ids:
         if node_id:
-            graph.add_node(
-                node_id
-            )
+            graph.add_node(node_id)
 
-    for edge in edges_data:
-        source = str(
-            edge.get(
-                "source",
-                "",
-            )
-        )
-
-        target = str(
-            edge.get(
-                "target",
-                "",
-            )
-        )
-
+    for source, target in edge_pairs:
         if (
             source
             and target
             and source in graph
             and target in graph
         ):
-            graph.add_edge(
-                source,
-                target,
-            )
+            graph.add_edge(source, target)
 
     if graph.number_of_nodes() == 0:
         return {}
@@ -1432,6 +1423,36 @@ def _compute_graph_positions(
         )
         for node_id, position in raw_positions.items()
     }
+
+
+def _compute_graph_positions(
+    nodes_data: List[Dict[str, Any]],
+    edges_data: List[Dict[str, Any]],
+) -> Dict[str, Tuple[float, float]]:
+    """
+    Compute stable, readable 2D positions for the interactive graph.
+
+    Wraps the cached layout: converts the graph to hashable tuples,
+    then delegates to _compute_graph_positions_cached.
+    """
+
+    node_ids = tuple(
+        str(n.get("id", ""))
+        for n in nodes_data
+    )
+
+    edge_pairs = tuple(
+        (
+            str(e.get("source", "")),
+            str(e.get("target", "")),
+        )
+        for e in edges_data
+    )
+
+    return _compute_graph_positions_cached(
+        node_ids,
+        edge_pairs,
+    )
 
 
 def _infer_node_stage(node: Dict[str, Any]) -> int:
@@ -1502,7 +1523,8 @@ def _render_streamlit_flow_dag(
 
         finding = _find_related_finding(result, node)
 
-        # Risk heatmap colors and pill: semi-see-through light grey before mapped, color-coded by severity when vulnerable
+        # Risk heatmap colors and pill: semi-see-through light grey before mapped,
+        # color-coded using the audit palette when vulnerable.
         is_vulnerable = False
         risk_score = 0.0
         vuln_id = ""
@@ -1525,23 +1547,23 @@ def _render_streamlit_flow_dag(
 
         if is_vulnerable:
             if risk_score >= 7.0 or test_status == "vulnerable":
-                border_color = "#ef4444"
-                bg_color = "rgba(239, 68, 68, 0.16)"
+                border_color = "#9c4b40"
+                bg_color = "rgba(156, 75, 64, 0.16)"
                 text_color = "#ffffff"
                 status_text = f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)"
-                box_shadow = "0 0 16px rgba(239, 68, 68, 0.45)"
+                box_shadow = "0 0 16px rgba(156, 75, 64, 0.35)"
             elif risk_score >= 4.0:
-                border_color = "#f59e0b"
-                bg_color = "rgba(245, 158, 11, 0.16)"
+                border_color = "#a27d31"
+                bg_color = "rgba(162, 125, 49, 0.16)"
                 text_color = "#ffffff"
                 status_text = f"WEAKNESS: {vuln_id} ({risk_score:.1f}/10)"
-                box_shadow = "0 0 12px rgba(245, 158, 11, 0.35)"
+                box_shadow = "0 0 12px rgba(162, 125, 49, 0.28)"
             else:
-                border_color = "#3b82f6"
-                bg_color = "rgba(59, 130, 246, 0.16)"
+                border_color = "#4f775b"
+                bg_color = "rgba(79, 119, 91, 0.16)"
                 text_color = "#ffffff"
                 status_text = f"INFO: {vuln_id} ({risk_score:.1f}/10)"
-                box_shadow = "0 2px 8px rgba(59, 130, 246, 0.25)"
+                box_shadow = "0 2px 8px rgba(79, 119, 91, 0.22)"
         else:
             # Semi-see-through and light grey before mapped to be vulnerable
             border_color = "rgba(203, 213, 225, 0.30)"
@@ -1621,7 +1643,7 @@ def _render_streamlit_flow_dag(
             str(dst_finding.get("test_status", "")).lower() == "vulnerable"
             or float(dst_finding.get("risk_score", dst_finding.get("final_risk_score", 0.0))) >= 7.0
         ):
-            edge_color = "#ef4444"
+            edge_color = "#9c4b40"
         else:
             edge_color = "rgba(148, 163, 184, 0.35)"
 
@@ -1881,6 +1903,7 @@ def render_interactive_pipeline_graph(
 
     return None
 
+
 TEST_CATALOG: Dict[str, Dict[str, str]] = {
     "V1": {
         "canonical_id": "V1_poisoning",
@@ -2053,6 +2076,11 @@ def render_attack_strategy_gate(
 ) -> bool:
     """
     Gate 1: require explicit human approval and test selection before Agent 2 executes.
+
+    The page-level hero owns the phase framing ("Human-in-the-Loop Review").
+    This function therefore only renders the numbered operational steps
+    (selection -> strategy details -> sign-off) and does not repeat the
+    intro copy shown above the fold.
     """
     plan = (
         result.get(
@@ -2142,13 +2170,8 @@ def render_attack_strategy_gate(
             """
         )
 
-    st.write(
-        "Agent 2 has prepared the dynamic testing strategy. "
-        "Review the proposed tests and authorize execution below."
-    )
-
     # -------------------------------------------------------------
-    # Test Selection (Strictly limited to Agent 2's proposed tests)
+    # Step 1 — Test selection (strictly Agent 2's proposed tests)
     # -------------------------------------------------------------
     raw_proposed = (
         plan.get("selected_tests")
@@ -2162,14 +2185,17 @@ def render_attack_strategy_gate(
     ]
     proposed_test_ids = [t for t in proposed_test_ids if t]
 
-    st.markdown("### 1. Dynamic Test Selection")
-    st.caption(
-        "Agent 2 formulated the dynamic tests below based on vulnerabilities and components detected in your pipeline code. "
-        "Tests not included by Agent 2 cannot be selected because the corresponding pipeline component is absent from your code. "
-        "Select at least 1 test to authorize for execution:"
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">01</span>Select tests to authorize</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="step-caption">Only tests mapped to components detected in your '
+        'pipeline can run. Select at least one.</div>',
+        unsafe_allow_html=True,
     )
 
-    multiselect_key = "gate1_selected_tests_multiselect"
+    multiselect_key = "gate1_selected_tests_multiselect_v5"
     if multiselect_key not in st.session_state:
         st.session_state[multiselect_key] = list(proposed_test_ids)
 
@@ -2185,12 +2211,17 @@ def render_attack_strategy_gate(
         format_func=lambda tid: _resolve_test_metadata(tid, plan, result)[0],
         help="Only tests formulated by Agent 2 for your pipeline can be selected. You must select at least 1 test.",
         key=multiselect_key,
+        label_visibility="collapsed",
     )
 
     # -------------------------------------------------------------
-    # Strategy Review Table (with Target & Reason filled)
+    # Step 2 — Strategy review table (with Target & Reason filled)
     # -------------------------------------------------------------
-    st.markdown("### 2. Proposed Attack Strategy Details")
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">02</span>Strategy details</div>',
+        unsafe_allow_html=True,
+    )
+
     strategy_rows = _strategy_test_rows(
         plan=plan,
         result=result,
@@ -2225,31 +2256,43 @@ def render_attack_strategy_gate(
         )
 
     # -------------------------------------------------------------
-    # Reviewer Sign-Off & Confirmation Checkbox
+    # Step 3 — Reviewer sign-off & confirmation checkbox
     # -------------------------------------------------------------
-    st.markdown("### 3. Reviewer Sign-Off")
-    approval_key = "gate_1_confirmation"
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">03</span>Sign-off</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Versioned keys so stale widget slots from earlier revisions of this
+    # function cannot be reused by Streamlit. The label must be identical
+    # in both branches below — changing it while keeping the same key would
+    # cause Streamlit to reattach the widget to an old element-tree slot.
+    approval_key = "gate_1_confirmation_v5"
     has_valid_selection = len(user_selected_tests) >= 1
+
+    CHECKBOX_LABEL = (
+        "I have reviewed the strategy above and authorize "
+        "the selected tests for execution."
+    )
 
     if not has_valid_selection:
         st.warning(
-            "Selection required: You must select at least 1 dynamic test before you can authorize execution."
+            "Select at least one test before authorizing execution."
         )
         approved = st.checkbox(
-            "I reviewed the proposed attack strategy and authorize Agent 2 to execute the selected dynamic tests.",
+            CHECKBOX_LABEL,
             value=False,
             disabled=True,
             key=approval_key,
         )
     else:
-        count_text = f"{len(user_selected_tests)} authorized dynamic test{'s' if len(user_selected_tests) > 1 else ''}"
         approved = st.checkbox(
-            f"I reviewed the proposed attack strategy and authorize Agent 2 to execute the {count_text}.",
+            CHECKBOX_LABEL,
             key=approval_key,
         )
 
     # -------------------------------------------------------------
-    # Approve & Reject Actions
+    # Approve & Reject actions (appears exactly once)
     # -------------------------------------------------------------
     def on_gate_1_reject() -> None:
         """Executed before rerun, safely resetting Gate 1 state without widget collision."""
@@ -2258,10 +2301,29 @@ def render_attack_strategy_gate(
         st.session_state.audit_result = None
         st.session_state.audit_executing = False
         st.session_state.report_signed_off = False
-        if "gate_1_confirmation" in st.session_state:
-            del st.session_state["gate_1_confirmation"]
-        if "gate1_selected_tests_multiselect" in st.session_state:
-            del st.session_state["gate1_selected_tests_multiselect"]
+
+        # Purge every key any past revision of this function might have used.
+        for stale_key in (
+            "gate_1_confirmation",
+            "gate_1_confirmation_v3",
+            "gate_1_confirmation_v4",
+            "gate_1_confirmation_v5",
+            "gate1_selected_tests_multiselect",
+            "gate1_selected_tests_multiselect_v3",
+            "gate1_selected_tests_multiselect_v4",
+            "gate1_selected_tests_multiselect_v5",
+            "gate_1_approve",
+            "gate_1_approve_v3",
+            "gate_1_approve_v4",
+            "gate_1_approve_v5",
+            "gate_1_reject",
+            "gate_1_reject_v3",
+            "gate_1_reject_v4",
+            "gate_1_reject_v5",
+        ):
+            if stale_key in st.session_state:
+                del st.session_state[stale_key]
+
         for qk in ("audit_id", "audit_phase"):
             if qk in st.query_params:
                 del st.query_params[qk]
@@ -2270,18 +2332,18 @@ def render_attack_strategy_gate(
 
     with approve_col:
         approve_clicked = st.button(
-            "Approve strategy & run tests",
+            "Approve & run tests",
             type="primary",
             use_container_width=True,
             disabled=not approved or not has_valid_selection,
-            key="gate_1_approve",
+            key="gate_1_approve_v5",
         )
 
     with reject_col:
         st.button(
             "Reject & return to upload",
             use_container_width=True,
-            key="gate_1_reject",
+            key="gate_1_reject_v5",
             on_click=on_gate_1_reject,
         )
 
@@ -2532,4 +2594,3 @@ def render_audit_ledger_panel(
         st.dataframe(ledger_rows, use_container_width=True, hide_index=True)
     else:
         st.info("Step-level checkpoints are active and recorded atomically in .aegisml_runtime/audit_memory.db.")
-

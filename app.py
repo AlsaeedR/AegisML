@@ -292,26 +292,63 @@ def clean_executive_summary(summary: Any) -> str:
         flags=re.IGNORECASE,
     )
 
+
 def render_agent_progress(
     progress_placeholder: Any,
     events: list[Dict[str, Any]],
 ) -> None:
-    """Render the current multi-agent execution timeline in place."""
-    stages = [
-        ("Agent 1", "Static threat analysis", "Complete"),
-        ("Agent 2", "Dynamic security testing", "Waiting"),
-        ("Agent 2", "Forensic diagnosis", "Waiting"),
-        ("Agent 3", "Evidence-informed reporting", "Waiting"),
-    ]
+    """
+    Render the current multi-agent execution timeline in place.
 
-    latest_by_step = {
-        event.get("step"): event
-        for event in events
-        if event.get("step")
+    Handles dynamically-named steps emitted by the backend: any event
+    carrying a `step` field becomes a row, in the order that step first
+    appeared. The four canonical AegisML stages are pre-seeded so the
+    panel is populated before the first event arrives.
+
+    The page hero already carries the "Executing Security Audit" heading,
+    so this panel omits its own heading.
+    """
+
+    CANONICAL_AGENTS = {
+        "Static threat analysis": "Agent 1",
+        "Dynamic security testing": "Agent 2",
+        "Forensic diagnosis": "Agent 2",
+        "Evidence-informed reporting": "Agent 3",
     }
 
+    # Track the latest event per step name, plus the order steps appeared.
+    latest_by_step: Dict[str, Dict[str, Any]] = {}
+    step_order: List[str] = []
+    active_steps: Dict[str, str] = {}
+
+    for event in events:
+        step = event.get("step")
+        if not step:
+            continue
+        if step not in latest_by_step:
+            step_order.append(step)
+        latest_by_step[step] = event
+        if event.get("event") == "agent_step_started":
+            active_steps[step] = event.get("agent", "Agent")
+        elif event.get("event") == "agent_step_finished":
+            active_steps.pop(step, None)
+
+    # Build the ordered list: canonical stages first (in their declared
+    # order), then any extra step names the backend emitted, in arrival
+    # order. This means if the backend splits Agent 2 into four sub-tasks
+    # they all appear as separate rows.
+    ordered: List[tuple] = []
+
+    for name, agent in CANONICAL_AGENTS.items():
+        ordered.append((agent, name))
+
+    for name in step_order:
+        if name not in CANONICAL_AGENTS:
+            agent = latest_by_step[name].get("agent", "Agent")
+            ordered.append((agent, name))
+
     rows = []
-    for agent, step, default_status in stages:
+    for index, (agent, step) in enumerate(ordered):
         event = latest_by_step.get(step, {})
         event_type = event.get("event")
 
@@ -319,27 +356,17 @@ def render_agent_progress(
             status = "Running"
             marker = "running"
         elif event_type == "agent_step_finished":
-            status = str(
-                event.get(
-                    "status",
-                    "Complete",
-                )
-            ).replace(
-                "_",
-                " ",
-            ).title()
-            marker = "complete"
-        elif default_status == "Complete":
-            status = "Complete"
+            status = (
+                str(event.get("status", "Complete"))
+                .replace("_", " ")
+                .title()
+            )
             marker = "complete"
         else:
-            status = default_status
+            status = "Waiting"
             marker = "waiting"
 
-        message = event.get(
-            "message",
-            "",
-        )
+        message = event.get("message", "")
 
         rows.append(
             f"""
@@ -354,14 +381,18 @@ def render_agent_progress(
             """
         )
 
+    active_label = "No agent is currently active"
+    if active_steps:
+        active_step = next(reversed(active_steps))
+        active_label = f"Active: {active_steps[active_step]} · {active_step}"
+
     progress_placeholder.html(
-        """
+        f"""
         <div class="agent-progress-panel">
-            <div class="agent-progress-heading">Audit execution</div>
-            <div class="agent-progress-subheading">Live agent activity</div>
-            {rows}
+            <div class="agent-progress-active">{active_label}</div>
+            {"".join(rows)}
         </div>
-        """.format(rows="".join(rows)),
+        """
     )
 
 
@@ -373,7 +404,15 @@ def run_approved_audit_with_progress(
     """Execute the approved audit while streaming agent telemetry to the UI."""
     event_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
     response_holder: Dict[str, Any] = {}
-    events: list[Dict[str, Any]] = []
+    events: list[Dict[str, Any]] = [
+        {
+            "event": "agent_step_finished",
+            "agent": "Agent 1",
+            "step": "Static threat analysis",
+            "status": "completed",
+            "message": "Static threat analysis completed and passed to Agent 2.",
+        }
+    ]
 
     def read_telemetry() -> None:
         try:
@@ -409,15 +448,25 @@ def run_approved_audit_with_progress(
     execute_thread.start()
 
     render_agent_progress(progress_placeholder, events)
+    last_render_count = len(events)
+
     while execute_thread.is_alive() or not event_queue.empty():
         try:
             while True:
                 event = event_queue.get_nowait()
                 if event.get("event") != "done":
                     events.append(event)
-                render_agent_progress(progress_placeholder, events)
         except queue.Empty:
             pass
+
+        # Only re-render when a new event has actually arrived. During the
+        # long stretches where the container sandbox is executing a single
+        # test with no telemetry updates, this avoids ~6 HTML re-renders
+        # per second of work that would produce identical output.
+        if len(events) != last_render_count:
+            render_agent_progress(progress_placeholder, events)
+            last_render_count = len(events)
+
         time.sleep(0.15)
 
     execute_thread.join()
@@ -427,9 +476,15 @@ def run_approved_audit_with_progress(
             events.append(event)
     render_agent_progress(progress_placeholder, events)
 
+    # Store the raw telemetry events in session state so the caller can
+    # render them for debugging. This is temporary — remove once backend
+    # telemetry emission is verified against the frontend rendering.
+    st.session_state["_debug_events"] = list(events)
+
     if "error" in response_holder:
         raise response_holder["error"]
     return response_holder["response"]
+
 
 # ---------------------------------------------------------
 # PDF report generation
@@ -1317,6 +1372,10 @@ st.markdown(
 # ---------------------------------------------------------
 # Load dashboard stylesheet
 # ---------------------------------------------------------
+# NOTE: Do not cache this read. During development the cache
+# prevents CSS changes from taking effect on the next rerun,
+# which previously caused the "+" button CSS to appear stuck.
+# The read is a few milliseconds — cheap enough to do every run.
 
 css_path = (
     Path(__file__).parent
@@ -1396,24 +1455,31 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
         is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
         gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
 
-        st.html(
-            f"""
-            <div class="upload-hero">
-                <div class="upload-hero-left">
-                    <div class="upload-brand-row">
-                        <div class="upload-logo">A</div>
-                        <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
-                    </div>
-                    <p class="upload-hero-subtitle">
-                        Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
-                    </p>
-                </div>
-                <div class="upload-status-badge">{gate_badge}</div>
-            </div>
-            """
-        )
+        # Wrap the whole Gate 1 body inside one atomic keyed container.
+        # Streamlit treats each keyed container as a single element with its
+        # own identity, so the entire block is placed at the container's
+        # code position — not at the cached position of any inner widget.
+        hitl_container = st.container(key="hitl_root_v5")
 
-        approved = render_attack_strategy_gate(st.session_state.audit_plan)
+        with hitl_container:
+            st.html(
+                f"""
+                <div class="upload-hero">
+                    <div class="upload-hero-left">
+                        <div class="upload-brand-row">
+                            <div class="upload-logo">A</div>
+                            <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                        </div>
+                        <p class="upload-hero-subtitle">
+                            Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                        </p>
+                    </div>
+                    <div class="upload-status-badge">{gate_badge}</div>
+                </div>
+                """
+            )
+
+            approved = render_attack_strategy_gate(st.session_state.audit_plan)
 
         if approved:
             if not check_docker_available():
@@ -1430,7 +1496,7 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
         st.stop()
 
     # ---------------------------------------------------------
-    # Execution phase: Human-in-the-Loop banner is bypassed completely
+    # Execution phase
     # ---------------------------------------------------------
     st.html(
         """
@@ -1441,7 +1507,7 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
                     <h1 class="upload-hero-title">Executing Security Audit</h1>
                 </div>
                 <p class="upload-hero-subtitle">
-                    Gate 1 approved. Running dynamic security tests and generating evidence-informed report...
+                    Running approved tests and correlating evidence. This may take several minutes.
                 </p>
             </div>
             <div class="upload-status-badge">DYNAMIC TESTS ACTIVE</div>
@@ -1449,22 +1515,56 @@ if st.session_state.audit_result is None and st.session_state.audit_plan is not 
         """
     )
 
-    progress_placeholder = st.empty()
-
+    # Gather the authorized test list before rendering the context card.
     selected_tests = None
     if isinstance(st.session_state.audit_plan, dict):
         strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
-        selected_tests = strat_plan.get("selected_tests") or st.session_state.audit_plan.get("selected_tests")
+        selected_tests = (
+            strat_plan.get("selected_tests")
+            or st.session_state.audit_plan.get("selected_tests")
+        )
+
+    active_audit_id = st.session_state.audit_id or ""
+    test_count = len(selected_tests) if selected_tests else 0
+
+    # Audit context card — sits between the hero and the live timeline so the
+    # progress panel is no longer the first widget on the page.
+    with st.container(border=True):
+        ctx_col1, ctx_col2, ctx_col3 = st.columns(3)
+        ctx_col1.metric(
+            "Audit session",
+            (active_audit_id[:12] + "…") if active_audit_id else "—",
+        )
+        ctx_col2.metric(
+            "Authorized tests",
+            test_count,
+        )
+        ctx_col3.metric(
+            "Phase",
+            "Running",
+        )
+
+    st.markdown("#### Live agent execution")
+    progress_placeholder = st.empty()
 
     try:
-        with st.spinner(
-            "Running approved dynamic tests and evidence correlation..."
-        ):
-            response = run_approved_audit_with_progress(
-                st.session_state.audit_id,
-                progress_placeholder,
-                selected_tests=selected_tests,
-            )
+        # The live progress panel is the loader — no separate spinner is used,
+        # which previously caused two overlapping loading indicators to appear.
+        response = run_approved_audit_with_progress(
+            st.session_state.audit_id,
+            progress_placeholder,
+            selected_tests=selected_tests,
+        )
+
+        # TEMPORARY DEBUG — shows every event the backend actually sent,
+        # in arrival order. Remove once backend telemetry is verified.
+        if "_debug_events" in st.session_state:
+            with st.expander("Raw telemetry events (debug)", expanded=True):
+                st.caption(
+                    f"Total events received from backend: "
+                    f"{len(st.session_state['_debug_events'])}"
+                )
+                st.json(st.session_state["_debug_events"])
 
         if response.status_code == 200:
             payload = response.json()
@@ -1702,7 +1802,7 @@ if st.session_state.audit_result is None:
     )
 
     # -----------------------------------------------------
-    # File uploads
+    # File uploads (exactly one file per category)
     # -----------------------------------------------------
 
     col1, col2, col3 = st.columns(
@@ -1727,11 +1827,15 @@ if st.session_state.audit_result is None:
                 """
             )
             pipeline_file = st.file_uploader(
-                "Pipeline source",
+                "Pipeline source · 1 file",
                 type=["py"],
-                help="Python ML pipeline source file.",
+                accept_multiple_files=False,
+                key="upload_pipeline_source",
+                help="One Python ML pipeline source file (.py).",
                 label_visibility="collapsed",
             )
+            if pipeline_file is not None:
+                st.caption(f"Attached: `{pipeline_file.name}`")
 
     with col2:
         with st.container(border=True):
@@ -1750,11 +1854,15 @@ if st.session_state.audit_result is None:
                 """
             )
             model_file = st.file_uploader(
-                "Trained model",
+                "Trained model · 1 file",
                 type=["pkl"],
-                help="Pickle model generated by the ML pipeline.",
+                accept_multiple_files=False,
+                key="upload_trained_model",
+                help="One pickle model file (.pkl).",
                 label_visibility="collapsed",
             )
+            if model_file is not None:
+                st.caption(f"Attached: `{model_file.name}`")
 
     with col3:
         with st.container(border=True):
@@ -1773,11 +1881,15 @@ if st.session_state.audit_result is None:
                 """
             )
             dataset_file = st.file_uploader(
-                "Dataset",
+                "Evaluation dataset · 1 file",
                 type=["csv"],
-                help="CSV dataset used by the model.",
+                accept_multiple_files=False,
+                key="upload_evaluation_dataset",
+                help="One CSV evaluation dataset (.csv).",
                 label_visibility="collapsed",
             )
+            if dataset_file is not None:
+                st.caption(f"Attached: `{dataset_file.name}`")
 
     st.write("")
 
@@ -2250,4 +2362,3 @@ else:
                 use_container_width=True,
                 disabled=not st.session_state.report_signed_off,
             )
-
