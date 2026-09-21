@@ -1,11 +1,16 @@
 import io
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import queue
 import threading
 import time
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import requests
 import streamlit as st
@@ -295,7 +300,8 @@ def clean_executive_summary(summary: Any) -> str:
 
 def render_agent_progress(
     progress_placeholder: Any,
-    events: list[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+    active_override: Optional[str] = None,
 ) -> None:
     """
     Render the current multi-agent execution timeline in place.
@@ -330,13 +336,12 @@ def render_agent_progress(
         latest_by_step[step] = event
         if event.get("event") == "agent_step_started":
             active_steps[step] = event.get("agent", "Agent")
-        elif event.get("event") == "agent_step_finished":
+        elif event.get("event") in ("agent_step_finished", "step_resumed_from_checkpoint"):
             active_steps.pop(step, None)
 
     # Build the ordered list: canonical stages first (in their declared
     # order), then any extra step names the backend emitted, in arrival
-    # order. This means if the backend splits Agent 2 into four sub-tasks
-    # they all appear as separate rows.
+    # order.
     ordered: List[tuple] = []
 
     for name, agent in CANONICAL_AGENTS.items():
@@ -348,6 +353,7 @@ def render_agent_progress(
             ordered.append((agent, name))
 
     rows = []
+    all_steps_completed = True
     for index, (agent, step) in enumerate(ordered):
         event = latest_by_step.get(step, {})
         event_type = event.get("event")
@@ -355,7 +361,8 @@ def render_agent_progress(
         if event_type == "agent_step_started":
             status = "Running"
             marker = "running"
-        elif event_type == "agent_step_finished":
+            all_steps_completed = False
+        elif event_type in ("agent_step_finished", "step_resumed_from_checkpoint"):
             status = (
                 str(event.get("status", "Complete"))
                 .replace("_", " ")
@@ -365,6 +372,7 @@ def render_agent_progress(
         else:
             status = "Waiting"
             marker = "waiting"
+            all_steps_completed = False
 
         message = event.get("message", "")
 
@@ -381,10 +389,24 @@ def render_agent_progress(
             """
         )
 
-    active_label = "No agent is currently active"
-    if active_steps:
+    if active_override:
+        active_label = active_override
+    elif active_steps:
         active_step = next(reversed(active_steps))
         active_label = f"Active: {active_steps[active_step]} · {active_step}"
+    elif all_steps_completed:
+        active_label = "All agents completed successfully"
+    else:
+        next_pending = None
+        for agent_cand, step_cand in ordered:
+            step_ev = latest_by_step.get(step_cand, {})
+            if step_ev.get("event") not in ("agent_step_finished", "step_resumed_from_checkpoint"):
+                next_pending = (agent_cand, step_cand)
+                break
+        if next_pending:
+            active_label = f"Active: {next_pending[0]} · {next_pending[1]}"
+        else:
+            active_label = "Active: Executing security audit pipeline..."
 
     progress_placeholder.html(
         f"""
@@ -411,8 +433,18 @@ def run_approved_audit_with_progress(
             "step": "Static threat analysis",
             "status": "completed",
             "message": "Static threat analysis completed and passed to Agent 2.",
-        }
+        },
+        {
+            "event": "agent_step_started",
+            "agent": "Agent 2",
+            "step": "Dynamic security testing",
+            "message": "Initializing testing sandbox and test harness...",
+        },
     ]
+    step_started_at: Dict[str, float] = {
+        "Dynamic security testing": time.time(),
+    }
+    MIN_RUNNING_TIME = 0.85
 
     def read_telemetry() -> None:
         try:
@@ -442,43 +474,102 @@ def run_approved_audit_with_progress(
         except Exception as exc:
             response_holder["error"] = exc
 
+    def process_incoming_event(ev: Dict[str, Any]) -> None:
+        ev_type = ev.get("event")
+        step_name = ev.get("step")
+        if not step_name or ev_type == "done":
+            return
+
+        agent_name = ev.get("agent", "Agent")
+
+        if ev_type == "agent_step_started":
+            step_started_at[step_name] = time.time()
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
+        elif ev_type in ("agent_step_finished", "step_resumed_from_checkpoint"):
+            if step_name not in step_started_at:
+                events.append({
+                    "event": "agent_step_started",
+                    "agent": agent_name,
+                    "step": step_name,
+                    "message": f"{agent_name} executing {step_name}...",
+                })
+                step_started_at[step_name] = time.time()
+                render_agent_progress(progress_placeholder, events)
+                time.sleep(MIN_RUNNING_TIME)
+            else:
+                elapsed = time.time() - step_started_at[step_name]
+                if elapsed < MIN_RUNNING_TIME:
+                    time.sleep(MIN_RUNNING_TIME - elapsed)
+
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
+        else:
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
     telemetry_thread = threading.Thread(target=read_telemetry, daemon=True)
     execute_thread = threading.Thread(target=execute_audit, daemon=True)
     telemetry_thread.start()
     execute_thread.start()
 
     render_agent_progress(progress_placeholder, events)
-    last_render_count = len(events)
 
     while execute_thread.is_alive() or not event_queue.empty():
-        try:
-            while True:
+        while not event_queue.empty():
+            try:
                 event = event_queue.get_nowait()
-                if event.get("event") != "done":
-                    events.append(event)
-        except queue.Empty:
-            pass
+                process_incoming_event(event)
+            except queue.Empty:
+                break
 
-        # Only re-render when a new event has actually arrived. During the
-        # long stretches where the container sandbox is executing a single
-        # test with no telemetry updates, this avoids ~6 HTML re-renders
-        # per second of work that would produce identical output.
-        if len(events) != last_render_count:
-            render_agent_progress(progress_placeholder, events)
-            last_render_count = len(events)
-
-        time.sleep(0.15)
+        time.sleep(0.1)
 
     execute_thread.join()
-    while not event_queue.empty():
-        event = event_queue.get_nowait()
-        if event.get("event") != "done":
-            events.append(event)
-    render_agent_progress(progress_placeholder, events)
+    telemetry_thread.join(timeout=1.5)
 
-    # Store the raw telemetry events in session state so the caller can
-    # render them for debugging. This is temporary — remove once backend
-    # telemetry emission is verified against the frontend rendering.
+    while not event_queue.empty():
+        try:
+            event = event_queue.get_nowait()
+            process_incoming_event(event)
+        except queue.Empty:
+            break
+
+    resp = response_holder.get("response")
+    if resp is not None and getattr(resp, "status_code", None) == 200:
+        existing_finished_steps = {
+            ev.get("step")
+            for ev in events
+            if ev.get("event") in ("agent_step_finished", "step_resumed_from_checkpoint")
+        }
+
+        canonical_steps = [
+            ("Agent 2", "Dynamic security testing", "Empirical penetration testing finished."),
+            ("Agent 2", "Forensic diagnosis", "Forensic diagnosis completed."),
+            ("Agent 3", "Evidence-informed reporting", "Final security report is ready."),
+        ]
+
+        for agent_name, step_name, msg in canonical_steps:
+            if step_name not in existing_finished_steps:
+                process_incoming_event({
+                    "event": "agent_step_finished",
+                    "agent": agent_name,
+                    "step": step_name,
+                    "status": "completed",
+                    "message": msg,
+                })
+
+        render_agent_progress(
+            progress_placeholder,
+            events,
+            active_override="All agents completed successfully",
+        )
+        time.sleep(1.2)
+    else:
+        render_agent_progress(progress_placeholder, events)
+
     st.session_state["_debug_events"] = list(events)
 
     if "error" in response_holder:

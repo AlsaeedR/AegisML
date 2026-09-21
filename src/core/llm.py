@@ -58,6 +58,8 @@ def get_llm(
         "api_key": api_key,
         "model": resolved_model,
         "temperature": temperature,
+        "request_timeout": float(os.getenv("OPENAI_REQUEST_TIMEOUT", "45.0")),
+        "max_retries": int(os.getenv("OPENAI_MAX_RETRIES", "2")),
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens

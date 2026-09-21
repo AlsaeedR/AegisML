@@ -7,6 +7,32 @@ import threading
 import asyncio
 from typing import Optional, List, Dict, Any, Tuple
 
+from dotenv import load_dotenv
+
+# Ensure environment variables from .env are loaded before any agent or LangChain imports
+load_dotenv()
+
+# Synchronize LangSmith and LangChain tracing environment variables
+if os.getenv("LANGSMITH_TRACING", "").lower() == "true" and not os.getenv("LANGCHAIN_TRACING_V2"):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+elif os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true" and not os.getenv("LANGSMITH_TRACING"):
+    os.environ["LANGSMITH_TRACING"] = "true"
+
+if os.getenv("LANGSMITH_API_KEY") and not os.getenv("LANGCHAIN_API_KEY"):
+    os.environ["LANGCHAIN_API_KEY"] = os.environ["LANGSMITH_API_KEY"]
+elif os.getenv("LANGCHAIN_API_KEY") and not os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGSMITH_API_KEY"] = os.environ["LANGCHAIN_API_KEY"]
+
+if os.getenv("LANGSMITH_PROJECT") and not os.getenv("LANGCHAIN_PROJECT"):
+    os.environ["LANGCHAIN_PROJECT"] = os.environ["LANGSMITH_PROJECT"]
+elif os.getenv("LANGCHAIN_PROJECT") and not os.getenv("LANGSMITH_PROJECT"):
+    os.environ["LANGSMITH_PROJECT"] = os.environ["LANGCHAIN_PROJECT"]
+
+if os.getenv("LANGSMITH_ENDPOINT") and not os.getenv("LANGCHAIN_ENDPOINT"):
+    os.environ["LANGCHAIN_ENDPOINT"] = os.environ["LANGSMITH_ENDPOINT"]
+elif os.getenv("LANGCHAIN_ENDPOINT") and not os.getenv("LANGSMITH_ENDPOINT"):
+    os.environ["LANGSMITH_ENDPOINT"] = os.environ["LANGCHAIN_ENDPOINT"]
+
 from fastapi import (
     FastAPI,
     File,

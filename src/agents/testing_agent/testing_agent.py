@@ -127,10 +127,15 @@ def _init_tracer_provider() -> None:
 
 
 def _langsmith_available() -> bool:
-    return bool(
-        os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
-        and os.getenv("LANGCHAIN_API_KEY")
+    tracing_enabled = (
+        os.getenv("LANGSMITH_TRACING", "").lower() == "true"
+        or os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
     )
+    api_key_present = bool(
+        os.getenv("LANGSMITH_API_KEY")
+        or os.getenv("LANGCHAIN_API_KEY")
+    )
+    return tracing_enabled and api_key_present
 
 
 def traced_node(node_name: str) -> Callable:
