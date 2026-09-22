@@ -6,6 +6,15 @@ import networkx as nx
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
 
+try:
+    from streamlit_flow import streamlit_flow
+    from streamlit_flow.elements import StreamlitFlowNode, StreamlitFlowEdge
+    from streamlit_flow.state import StreamlitFlowState
+    from streamlit_flow.layouts import ManualLayout, LayeredLayout
+    HAS_STREAMLIT_FLOW = True
+except Exception:
+    HAS_STREAMLIT_FLOW = False
+
 
 def escape(value: Any) -> str:
     return html.escape(
@@ -82,6 +91,16 @@ def severity_class(
         return "severity-medium"
 
     return "severity-low"
+
+
+def severity_slug(
+    severity: str,
+) -> str:
+    """Return a stable data-attribute slug for finding-card striping."""
+    normalized = str(severity or "").strip().lower()
+    if normalized in {"critical", "high", "medium", "low"}:
+        return normalized
+    return "na"
 
 
 def risk_fill_class(score: int) -> str:
@@ -226,6 +245,14 @@ def finding_card(
         final_severity
     )
 
+    # Left-edge stripe slug: prefers the Not-Applicable neutral grey when
+    # the correlation status removes the finding from the risk scale.
+    card_stripe_slug = (
+        "na"
+        if display_severity == "Not Applicable"
+        else severity_slug(final_severity)
+    )
+
     category = finding.get(
         "category",
         "Security finding",
@@ -339,28 +366,28 @@ def finding_card(
         controls_str = ", ".join(mitigating_controls)
         if control_verdict == "verified_effective" or "mitigated" in correlation_lower or "defended" in correlation_lower:
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #15803d;">
+            <div class="finding-meta controls-verified">
                 verified active controls:
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif control_verdict == "partially_effective":
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #0284c7;">
+            <div class="finding-meta controls-partial">
                 partially active controls (mitigated major failure):
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif control_verdict == "bypassed" or ("hidden risk" in correlation_lower and final_severity.lower() in ["critical", "high"]):
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #c2410c;">
+            <div class="finding-meta controls-bypassed">
                 bypassed controls (failed under penetration testing):
                 <strong>{escape(controls_str)}</strong>
             </div>
             """
         elif "confirmed" in correlation_lower or status.lower() == "vulnerable":
             controls_meta_html = f"""
-            <div class="finding-meta" style="color: #64748b;">
+            <div class="finding-meta controls-ineffective">
                 ineffective checks observed in code:
                 {escape(controls_str)}
             </div>
@@ -393,7 +420,7 @@ def finding_card(
         right_box_class = "suggested-fix"
 
     return f"""
-    <div class="finding-card">
+    <div class="finding-card" data-sev="{card_stripe_slug}">
 
         <div class="finding-head">
 
@@ -655,8 +682,8 @@ def render_dashboard(
 
     ring_background = (
         "conic-gradient("
-        f"#a27d31 {score}%, "
-        f"#dddeda {score}%"
+        f"#ff751f {score}%, "
+        f"#2c2c2f {score}%"
         ")"
     )
 
@@ -687,7 +714,7 @@ def render_dashboard(
             ),
 
             pipeline_node(
-                "🌐",
+                "🎯",
                 "Inference surface",
                 "adversarial robustness assessment",
                 adversarial,
@@ -705,8 +732,9 @@ def render_dashboard(
 
     if not findings_html:
         findings_html = """
-        <div class="finding-card">
-            No security findings were generated.
+        <div class="finding-empty">
+            <strong>No security findings were generated.</strong>
+            Every detected surface passed the theoretical and dynamic assessment.
         </div>
         """
 
@@ -718,8 +746,8 @@ def render_dashboard(
     if checkpoint_loaded:
         status_badges_html = f"""
         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <div class="scan-status" style="background: #eef4f0; border-color: #c3d9cb; color: #2d553b; font-weight: 600;">
-                <span class="scan-dot" style="background: #4f775b;"></span>
+            <div class="scan-status" style="background: rgba(61, 220, 132, 0.12); border-color: rgba(61, 220, 132, 0.35); color: #3ddc84; font-weight: 600;">
+                <span class="scan-dot" style="background: #3ddc84;"></span>
                 CHECKPOINT LOADED ({steps_count} steps)
             </div>
             <div class="scan-status">
@@ -890,7 +918,7 @@ def render_dashboard(
                     <div>
                         <strong>Knowledge:</strong>
                         {escape(attacker_knowledge)}
-                        {f'<div style="font-size: 0.78rem; color: #64748b; margin-top: 2px;">{escape(knowledge_desc)}</div>' if knowledge_desc else ''}
+                        {f'<div style="font-size: 0.78rem; color: #7c7c7c; margin-top: 2px;">{escape(knowledge_desc)}</div>' if knowledge_desc else ''}
                     </div>
 
                     <div>
@@ -917,6 +945,7 @@ def render_dashboard(
         return content_html
 
     return summary_html + content_html
+
 
 # =========================================================
 # HUMAN-IN-THE-LOOP REMEDIATION UI
@@ -1127,10 +1156,21 @@ def _find_related_finding(
     if isinstance(embedded, dict):
         return embedded
 
-    findings = (
-        result.get("report", {})
-        .get("findings", [])
-    ) or []
+    raw_findings = (
+        result.get("report", {}).get("findings")
+        or result.get("findings")
+        or result.get("vulnerability_findings")
+        or []
+    )
+    findings: List[Dict[str, Any]] = []
+    if isinstance(raw_findings, dict):
+        for val in raw_findings.values():
+            if isinstance(val, list):
+                findings.extend(val)
+            elif isinstance(val, dict):
+                findings.append(val)
+    elif isinstance(raw_findings, list):
+        findings = raw_findings
 
     node_text = " ".join(
         str(
@@ -1298,16 +1338,16 @@ def _node_graph_color(
         ).lower()
 
     if severity == "critical":
-        return "#b91c1c"
+        return "#ff4d4d"
 
     if severity == "high":
-        return "#c2410c"
+        return "#ff751f"
 
     if severity == "medium":
-        return "#a27d31"
+        return "#ffb648"
 
     if severity == "low":
-        return "#4f8060"
+        return "#3ddc84"
 
     node_type = str(
         node.get(
@@ -1320,68 +1360,39 @@ def _node_graph_color(
     ).lower()
 
     if "data" in node_type:
-        return "#536b78"
+        return "#7c7c7c"
 
     if "model" in node_type or "classifier" in node_type:
-        return "#65558f"
+        return "#2dd4bf"
 
-    return "#667064"
+    return "#7c7c7c"
 
 
-
-def _compute_graph_positions(
-    nodes_data: List[Dict[str, Any]],
-    edges_data: List[Dict[str, Any]],
+@st.cache_data(show_spinner=False)
+def _compute_graph_positions_cached(
+    node_ids: Tuple[str, ...],
+    edge_pairs: Tuple[Tuple[str, str], ...],
 ) -> Dict[str, Tuple[float, float]]:
     """
-    Compute stable, readable 2D positions for the interactive graph.
-
-    The previous hierarchical layout compressed a mostly sequential AST graph
-    into a narrow vertical column. NetworkX spring_layout spreads connected
-    nodes across the available canvas while keeping the same result stable
-    between reruns.
+    Cache-safe wrapper around the spring layout. Accepts tuples so
+    Streamlit can hash the arguments. Avoids recomputing a 500-iteration
+    spring layout on every rerun for an unchanged pipeline graph.
     """
 
     graph = nx.DiGraph()
 
-    for node in nodes_data:
-        node_id = str(
-            node.get(
-                "id",
-                "",
-            )
-        )
-
+    for node_id in node_ids:
         if node_id:
-            graph.add_node(
-                node_id
-            )
+            graph.add_node(node_id)
 
-    for edge in edges_data:
-        source = str(
-            edge.get(
-                "source",
-                "",
-            )
-        )
-
-        target = str(
-            edge.get(
-                "target",
-                "",
-            )
-        )
-
+    for source, target in edge_pairs:
         if (
             source
             and target
             and source in graph
             and target in graph
         ):
-            graph.add_edge(
-                source,
-                target,
-            )
+            graph.add_edge(source, target)
 
     if graph.number_of_nodes() == 0:
         return {}
@@ -1414,16 +1425,289 @@ def _compute_graph_positions(
     }
 
 
+def _compute_graph_positions(
+    nodes_data: List[Dict[str, Any]],
+    edges_data: List[Dict[str, Any]],
+) -> Dict[str, Tuple[float, float]]:
+    """
+    Compute stable, readable 2D positions for the interactive graph.
+
+    Wraps the cached layout: converts the graph to hashable tuples,
+    then delegates to _compute_graph_positions_cached.
+    """
+
+    node_ids = tuple(
+        str(n.get("id", ""))
+        for n in nodes_data
+    )
+
+    edge_pairs = tuple(
+        (
+            str(e.get("source", "")),
+            str(e.get("target", "")),
+        )
+        for e in edges_data
+    )
+
+    return _compute_graph_positions_cached(
+        node_ids,
+        edge_pairs,
+    )
+
+
+def _infer_node_stage(node: Dict[str, Any]) -> int:
+    """Classifies a pipeline component into one of the 5 canonical lifecycle stages."""
+    if "stage_index" in node and isinstance(node["stage_index"], int):
+        return node["stage_index"]
+    node_type = str(node.get("type", "") or node.get("component_type", "")).lower()
+    name = str(node.get("name", "") or node.get("label", "")).lower()
+
+    if any(k in node_type or k in name for k in ["ingestion", "read_csv", "read_table", "open", "dataset", "input", "loader", "from_csv"]):
+        return 0
+    elif any(k in node_type or k in name for k in ["validation", "assert", "isinstance", "null", "check", "sanitize"]):
+        return 1
+    elif any(k in node_type or k in name for k in ["preprocess", "clean", "tokenize", "vectoriz", "transform", "scale", "encoder", "stem"]):
+        return 2
+    elif any(k in node_type or k in name for k in ["model", "train", "fit", "classifier", "regressor", "estimator", "bayes", "forest", "neural", "multinomial", "nb", "logistic", "svm", "svc", "tree", "gradient", "boost", "sgd"]):
+        return 3
+    elif any(k in node_type or k in name for k in ["infer", "predict", "evaluate", "score", "dump", "save", "persist", "output"]):
+        return 4
+    return 2
+
+
+STAGE_METADATA = {
+    0: {"name": "Data Ingestion", "pill": "INGESTION"},
+    1: {"name": "Validation & Hygiene", "pill": "VALIDATION"},
+    2: {"name": "Feature Engineering", "pill": "PREPROCESSING"},
+    3: {"name": "Model Architecture", "pill": "ESTIMATOR"},
+    4: {"name": "Inference & Output", "pill": "PERSISTENCE"},
+}
+
+
+def _render_streamlit_flow_dag(
+    nodes_data: List[Dict[str, Any]],
+    edges_data: List[Dict[str, Any]],
+    result: Dict[str, Any],
+    node_lookup: Dict[str, Dict[str, Any]],
+) -> Optional[str]:
+    """Renders the hierarchical DAG using React Flow with non-overlapping ManualLayout positions."""
+    # 1. Group nodes by lifecycle stage (0 to 4)
+    stage_groups: Dict[int, List[Dict[str, Any]]] = {0: [], 1: [], 2: [], 3: [], 4: []}
+    for node in nodes_data:
+        stage_idx = _infer_node_stage(node)
+        stage_groups.setdefault(stage_idx, []).append(node)
+
+    # 2. Compute exact coordinates per stage column (ManualLayout prevents ELK animations)
+    col_x_map = {0: 40.0, 1: 340.0, 2: 640.0, 3: 940.0, 4: 1240.0}
+    max_count = max(len(grp) for grp in stage_groups.values()) if stage_groups else 1
+    y_pitch = 145.0
+
+    node_positions: Dict[str, Tuple[float, float]] = {}
+    for s_idx, grp in stage_groups.items():
+        col_x = col_x_map.get(s_idx, 640.0)
+        col_height = (len(grp) - 1) * y_pitch
+        max_height = (max_count - 1) * y_pitch
+        y_start = 30.0 + max(0.0, (max_height - col_height) / 2.0)
+        for idx_in_col, n in enumerate(grp):
+            node_positions[str(n.get("id", ""))] = (col_x, y_start + (idx_in_col * y_pitch))
+
+    flow_nodes: List[StreamlitFlowNode] = []
+
+    for node in nodes_data:
+        node_id = str(node.get("id", ""))
+        stage_idx = _infer_node_stage(node)
+        label = str(node.get("name", node.get("label", node_id)))
+        display_label = label if len(label) <= 28 else label[:25] + "…"
+        ast_type = node.get("ast_node_type") or node.get("ast_type") or "Component"
+        line_number = node.get("line_number") or node.get("lineno")
+
+        finding = _find_related_finding(result, node)
+
+        # Risk heatmap colors and pill: semi-see-through light grey before mapped,
+        # color-coded using the audit palette when vulnerable.
+        is_vulnerable = False
+        risk_score = 0.0
+        vuln_id = ""
+        test_status = ""
+
+        if finding:
+            risk_score = float(
+                finding.get(
+                    "risk_score",
+                    finding.get(
+                        "final_risk_score",
+                        finding.get("static_risk_score", 0.0),
+                    ),
+                )
+            )
+            vuln_id = str(finding.get("vulnerability_id", "RISK"))
+            test_status = str(finding.get("test_status", "")).lower()
+            if test_status == "vulnerable" or risk_score >= 4.0:
+                is_vulnerable = True
+
+        if is_vulnerable:
+            if risk_score >= 7.0 or test_status == "vulnerable":
+                border_color = "#ff4d4d"
+                bg_color = "rgba(255, 77, 77, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 0 16px rgba(255, 77, 77, 0.35)"
+            elif risk_score >= 4.0:
+                border_color = "#ff751f"
+                bg_color = "rgba(255, 117, 31, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"WEAKNESS: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 0 12px rgba(255, 117, 31, 0.28)"
+            else:
+                border_color = "#3ddc84"
+                bg_color = "rgba(61, 220, 132, 0.16)"
+                text_color = "#ffffff"
+                status_text = f"INFO: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 2px 8px rgba(61, 220, 132, 0.22)"
+        else:
+            # Semi-see-through and light grey before mapped to be vulnerable
+            border_color = "rgba(124, 124, 124, 0.35)"
+            bg_color = "rgba(255, 255, 255, 0.03)"
+            text_color = "#d7d7d7"
+            status_text = "BASELINE COMPONENT"
+            box_shadow = "0 2px 6px rgba(0, 0, 0, 0.35)"
+
+        stage_info = STAGE_METADATA.get(stage_idx, STAGE_METADATA[2])
+        line_part = f"L{line_number} · " if line_number else ""
+        content = (
+            f"**STAGE {stage_idx + 1}: {stage_info['pill']}**\n\n"
+            f"### `{display_label}`\n\n"
+            f"*{line_part}{ast_type}*\n\n"
+            f"`{status_text}`"
+        )
+
+        if stage_idx == 0:
+            node_type = "input"
+            source_pos = "right"
+            target_pos = "left"
+        elif stage_idx == 4:
+            node_type = "output"
+            source_pos = "right"
+            target_pos = "left"
+        else:
+            node_type = "default"
+            source_pos = "right"
+            target_pos = "left"
+
+        style = {
+            "background": bg_color,
+            "color": text_color,
+            "border": f"2px solid {border_color}",
+            "borderRadius": "10px",
+            "padding": "12px 14px",
+            "minWidth": "220px",
+            "maxWidth": "280px",
+            "boxShadow": box_shadow,
+            "fontSize": "12px",
+            "lineHeight": "1.4",
+            "textAlign": "left",
+        }
+
+        pos_xy = node_positions.get(node_id, (0.0, 0.0))
+
+        flow_nodes.append(
+            StreamlitFlowNode(
+                id=node_id,
+                pos=pos_xy,
+                data={"content": content},
+                node_type=node_type,
+                source_position=source_pos,
+                target_position=target_pos,
+                style=style,
+                draggable=True,
+                selectable=True,
+            )
+        )
+
+    flow_edges: List[StreamlitFlowEdge] = []
+    seen_edges = set()
+
+    for idx, edge in enumerate(edges_data):
+        src = str(edge.get("source", edge.get("from", "")))
+        dst = str(edge.get("target", edge.get("to", "")))
+        if not src or not dst or src == dst:
+            continue
+        edge_pair = (src, dst)
+        if edge_pair in seen_edges:
+            continue
+        seen_edges.add(edge_pair)
+
+        dst_node = node_lookup.get(dst, {})
+        dst_finding = _find_related_finding(result, dst_node)
+        if dst_finding and (
+            str(dst_finding.get("test_status", "")).lower() == "vulnerable"
+            or float(dst_finding.get("risk_score", dst_finding.get("final_risk_score", 0.0))) >= 7.0
+        ):
+            edge_color = "#ff4d4d"
+        else:
+            edge_color = "rgba(124, 124, 124, 0.4)"
+
+        flow_edges.append(
+            StreamlitFlowEdge(
+                id=f"e_{src}_{dst}_{idx}",
+                source=src,
+                target=dst,
+                edge_type="smoothstep",
+                animated=True,
+                style={"stroke": edge_color, "strokeWidth": 2.5},
+                marker_end={"type": "arrowclosed", "color": edge_color},
+            )
+        )
+
+    phase = "report" if ("report" in result and isinstance(result["report"], dict)) else "gate1"
+    cache_token = f"{phase}_{len(nodes_data)}_{len(edges_data)}_{abs(hash(tuple(str(n.get('id', '')) for n in nodes_data)))}"
+    state_key = f"_aegisml_flow_state_{cache_token}"
+    fitted_key = f"_aegisml_flow_fitted_{cache_token}"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = StreamlitFlowState(
+            nodes=flow_nodes,
+            edges=flow_edges,
+            timestamp=0,
+        )
+
+    flow_state = st.session_state[state_key]
+    should_fit = not st.session_state.get(fitted_key, False)
+
+    st.caption(
+        "Hierarchical Pipeline DAG · 5 Lifecycle Stages (Ingestion -> Validation -> Preprocessing -> Model -> Output) · "
+        "Drag, pan, or zoom canvas · Click any node to inspect its code and security context."
+    )
+
+    curr_state = streamlit_flow(
+        key=f"aegisml_pipeline_flow_{cache_token}",
+        state=flow_state,
+        height=560,
+        fit_view=should_fit,
+        show_controls=True,
+        show_minimap=False,
+        layout=ManualLayout(),
+        get_node_on_click=True,
+        hide_watermark=True,
+    )
+
+    if should_fit:
+        st.session_state[fitted_key] = True
+
+    return getattr(curr_state, "selected_id", None) if curr_state else None
+
+
 def render_interactive_pipeline_graph(
     result: Dict[str, Any],
 ) -> Optional[str]:
     """
-    Render the Agent 1 pipeline graph as an interactive NetworkX-backed graph.
+    Render the Agent 1 pipeline graph as a hierarchical DAG.
 
-    The graph uses deterministic 2D NetworkX positions instead of the narrow
-    hierarchical column that previously made the nodes look like a single line.
+    Uses Streamlit Flow (React Flow) with the Sugiyama layered layout algorithm
+    to organize components across the 5 pipeline lifecycle stages with zero overlap.
+    Falls back gracefully to NetworkX/agraph if React Flow is unavailable.
 
-    Clicking a node opens a code-inspection dialog containing:
+    Clicking a node displays an inline code inspection card containing:
     - component name/type
     - AST node type
     - source line
@@ -1448,339 +1732,177 @@ def render_interactive_pipeline_graph(
         or ""
     )
 
-    graph_positions = _compute_graph_positions(
-        nodes_data,
-        edges_data,
-    )
+    node_lookup: Dict[str, Dict[str, Any]] = {
+        str(n.get("id", "")): n for n in nodes_data if n.get("id")
+    }
 
-    graph_nodes: List[Node] = []
-    node_lookup: Dict[str, Dict[str, Any]] = {}
+    selected_id: Optional[str] = None
+    flow_rendered = False
 
-    transform_count = 0
-    for node in nodes_data:
-        node_id = str(
-            node.get(
-                "id",
-                "",
+    if HAS_STREAMLIT_FLOW:
+        try:
+            flow_selected = _render_streamlit_flow_dag(
+                nodes_data=nodes_data,
+                edges_data=edges_data,
+                result=result,
+                node_lookup=node_lookup,
             )
+            flow_rendered = True
+            if flow_selected:
+                selected_id = str(flow_selected)
+        except Exception:
+            flow_rendered = False
+
+    if not flow_rendered:
+        graph_positions = _compute_graph_positions(
+            nodes_data,
+            edges_data,
         )
 
-        node_lookup[node_id] = node
+        graph_nodes: List[Node] = []
+        transform_count = 0
+        for node in nodes_data:
+            node_id = str(node.get("id", ""))
+            finding = _find_related_finding(result, node)
+            line_number = node.get("line_number") or node.get("lineno") or node.get("line")
+            ast_type = node.get("ast_node_type") or node.get("ast_type") or "Pipeline component"
+            label = str(node.get("name", node.get("label", node_id)))
+            display_label = label if len(label) <= 30 else label[:27] + "..."
 
-        finding = _find_related_finding(
-            result,
-            node,
-        )
+            title_parts = [f"Component: {label}", f"AST: {ast_type}"]
+            if line_number:
+                title_parts.append(f"Line: {line_number}")
+            if finding:
+                title_parts.append(f"Risk: {finding.get('risk_score', 'N/A')}")
 
-        line_number = (
-            node.get("line_number")
-            or node.get("lineno")
-            or node.get("line")
-        )
-
-        ast_type = (
-            node.get("ast_node_type")
-            or node.get("ast_type")
-            or node.get("node_type")
-            or node.get("type")
-            or "Pipeline component"
-        )
-
-        label = str(
-            node.get(
-                "name",
-                node.get(
-                    "label",
-                    node_id,
-                ),
-            )
-        )
-
-        display_label = (
-            label
-            if len(label) <= 30
-            else label[:27] + "..."
-        )
-
-        title_parts = [
-            f"Component: {label}",
-            f"AST: {ast_type}",
-        ]
-
-        if line_number:
-            title_parts.append(
-                f"Line: {line_number}"
+            x_pos, y_pos = graph_positions.get(node_id, (0.0, 0.0))
+            graph_nodes.append(
+                Node(
+                    id=node_id,
+                    label=display_label,
+                    size=200,
+                    shape="box",
+                    color=_node_graph_color(node, finding),
+                    font={"color": "#f3f3f1", "size": 24},
+                    margin=16,
+                    x=x_pos,
+                    y=y_pos,
+                    fixed=True,
+                    title="\n".join(title_parts),
+                )
             )
 
-        if finding:
-            title_parts.append(
-                "Risk: "
-                f"{finding.get('risk_score', finding.get('final_risk_score', finding.get('static_risk_score', 'N/A')))}"
+        graph_edges: List[Edge] = []
+        for edge in edges_data:
+            graph_edges.append(
+                Edge(
+                    source=str(edge.get("source", "")),
+                    target=str(edge.get("target", "")),
+                    label=str(edge.get("label", "")),
+                    type="CURVE_SMOOTH",
+                    color="#7c7c7c",
+                    width=3.0,
+                )
             )
 
-        x_position, y_position = graph_positions.get(
-            node_id,
-            (
-                0.0,
-                0.0,
-            ),
-        )
-        if label == "transform":
-            transform_count += 1
-            if transform_count == 1:
-                x_position -= 120
-                y_position += 80
-
-            elif transform_count == 2:
-                x_position += 140
-                y_position -= 70
-        
-        graph_nodes.append(
-            Node(
-                id=node_id,
-                label=display_label,
-                size=250,
-                shape="box",
-                color=_node_graph_color(
-                    node,
-                    finding,
-                ),
-                font={
-                    "color": "#ffffff",
-                    "size": 42,
-                },
-                margin=24,
-                widthConstraint={
-                    "minimum": 210,
-                    "maximum": 360,
-                },
-                 x=x_position,
-                y=y_position,
-                fixed=True,
-                title="\n".join(
-                    title_parts
-                ),
-            )
+        config = Config(
+            width="100%",
+            height=560,
+            directed=True,
+            physics=False,
+            hierarchical=False,
+            nodeHighlightBehavior=True,
+            highlightColor="#ff751f",
+            zoom=0.95,
         )
 
-    graph_edges: List[Edge] = []
-
-    for edge in edges_data:
-        graph_edges.append(
-            Edge(
-                source=str(
-                    edge.get(
-                        "source",
-                        "",
-                    )
-                ),
-                target=str(
-                    edge.get(
-                        "target",
-                        "",
-                    )
-                ),
-                label=str(
-                    edge.get(
-                        "label",
-                        "",
-                    )
-                ),
-                type="CURVE_SMOOTH",
-                color="#d6a7a2",
-                width=3.0,
-            )
+        st.caption(
+            "Interactive pipeline graph · use zoom/pan to explore · "
+            "click a node to inspect its source code and security context."
         )
 
-    config = Config(
-        width="100%",
-        height=620,
-        directed=True,
-        physics=False,
-        hierarchical=False,
-        nodeHighlightBehavior=True,
-        highlightColor="#f0c36d",
-        collapsible=False,
-        zoom=0.95,
-    )
-
-    st.caption(
-        "Interactive pipeline graph · use zoom/pan to explore · "
-        "click a node to inspect its source code and security context."
-    )
-
-    selected_node_id = agraph(
-        nodes=graph_nodes,
-        edges=graph_edges,
-        config=config,
-    )
-
-    if selected_node_id:
-        selected_id = str(
-            selected_node_id
+        selected_node_id = agraph(
+            nodes=graph_nodes,
+            edges=graph_edges,
+            config=config,
         )
+        if selected_node_id:
+            selected_id = str(selected_node_id)
 
-        node = node_lookup.get(
-            selected_id
-        )
+    # 3. Interactive Inspector Panel (works across both Streamlit Flow and fallback)
+    if selected_id and selected_id != st.session_state.get("_dismissed_pipeline_node"):
+        st.session_state["_active_pipeline_node"] = selected_id
 
+    active_id = st.session_state.get("_active_pipeline_node")
+    if active_id and active_id != st.session_state.get("_dismissed_pipeline_node"):
+        node = node_lookup.get(active_id)
         if node is not None:
-            finding = _find_related_finding(
-                result,
-                node,
+            finding = _find_related_finding(result, node)
+            node_name = str(node.get("name", node.get("label", active_id)))
+            ast_type = (
+                node.get("ast_node_type")
+                or node.get("ast_type")
+                or node.get("node_type")
+                or node.get("type")
+                or "Unavailable"
+            )
+            component_type = (
+                node.get("component_type")
+                or node.get("category")
+                or node.get("component")
+                or "Pipeline component"
+            )
+            line_number = (
+                node.get("line_number")
+                or node.get("lineno")
+                or node.get("line")
             )
 
-            @st.dialog(
-                "Pipeline node inspection",
-                width="large",
-            )
-            def show_node_inspection() -> None:
-                node_name = str(
-                    node.get(
-                        "name",
-                        node.get(
-                            "label",
-                            selected_id,
-                        ),
-                    )
-                )
+            with st.container(border=True):
+                header_col1, header_col2 = st.columns([5, 1])
+                with header_col1:
+                    st.markdown(f"#### Pipeline Node Inspector: `{node_name}`")
+                with header_col2:
+                    if st.button(
+                        "Close Inspector",
+                        key=f"close_node_inspector_{active_id}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["_dismissed_pipeline_node"] = active_id
+                        st.session_state["_active_pipeline_node"] = None
+                        st.rerun()
 
-                ast_type = (
-                    node.get("ast_node_type")
-                    or node.get("ast_type")
-                    or node.get("node_type")
-                    or node.get("type")
-                    or "Unavailable"
-                )
+                meta_col1, meta_col2, meta_col3 = st.columns(3)
+                meta_col1.metric("Component", str(component_type))
+                meta_col2.metric("AST node", str(ast_type))
+                meta_col3.metric("Source line", str(line_number) if line_number else "N/A")
 
-                component_type = (
-                    node.get("component_type")
-                    or node.get("category")
-                    or node.get("component")
-                    or "Pipeline component"
-                )
-
-                line_number = (
-                    node.get("line_number")
-                    or node.get("lineno")
-                    or node.get("line")
-                )
-
-                st.markdown(
-                    f"### {node_name}"
-                )
-
-                meta_col1, meta_col2, meta_col3 = (
-                    st.columns(3)
-                )
-
-                meta_col1.metric(
-                    "Component",
-                    str(
-                        component_type
-                    ),
-                )
-
-                meta_col2.metric(
-                    "AST node",
-                    str(
-                        ast_type
-                    ),
-                )
-
-                meta_col3.metric(
-                    "Source line",
-                    (
-                        str(
-                            line_number
-                        )
-                        if line_number
-                        else "N/A"
-                    ),
-                )
-
-                st.markdown(
-                    "#### Source context"
-                )
-
-                source_context = _extract_source_context(
-                    source_code,
-                    line_number,
-                )
-
-                st.code(
-                    source_context,
-                    language="python",
-                )
+                st.markdown("##### Source context")
+                source_context = _extract_source_context(source_code, line_number)
+                st.code(source_context, language="python")
 
                 if finding:
-                    st.markdown(
-                        "#### Related security finding"
-                    )
-
-                    risk_col1, risk_col2, risk_col3 = (
-                        st.columns(3)
-                    )
-
-                    risk_col1.metric(
-                        "Finding",
-                        str(
-                            finding.get(
-                                "vulnerability_id",
-                                "N/A",
-                            )
-                        ),
-                    )
-
+                    st.markdown("##### Related security finding")
+                    risk_col1, risk_col2, risk_col3 = st.columns(3)
+                    risk_col1.metric("Finding", str(finding.get("vulnerability_id", "N/A")))
                     risk_col2.metric(
                         "Risk score",
-                        (
-                            f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10"
-                        ),
+                        f"{float(finding.get('risk_score', finding.get('final_risk_score', 0.0))):.1f}/10",
                     )
+                    risk_col3.metric("Status", str(finding.get("test_status", "not_tested")))
 
-                    risk_col3.metric(
-                        "Status",
-                        str(
-                            finding.get(
-                                "test_status",
-                                "not_tested",
-                            )
-                        ),
-                    )
+                    st.write(finding.get("description", "No finding description is available."))
 
-                    st.write(
-                        finding.get(
-                            "description",
-                            "No finding description is available.",
-                        )
-                    )
-
-                    affected = finding.get(
-                        "affected_components",
-                        [],
-                    )
-
+                    affected = finding.get("affected_components", [])
                     if affected:
-                        st.caption(
-                            "Affected components: "
-                            + ", ".join(
-                                str(item)
-                                for item in affected
-                            )
-                        )
-
+                        st.caption("Affected components: " + ", ".join(str(item) for item in affected))
                 else:
-                    st.info(
-                        "No report finding is directly mapped "
-                        "to this pipeline node."
-                    )
+                    st.info("No report finding is directly mapped to this pipeline node.")
 
-            show_node_inspection()
-
-        return selected_id
+            return active_id
 
     return None
+
 
 TEST_CATALOG: Dict[str, Dict[str, str]] = {
     "V1": {
@@ -1889,11 +2011,23 @@ def _strategy_test_rows(
         or []
     )
 
+    # Build an ordered list of tests to display: proposed tests plus any added by reviewer
+    items_to_display: List[Any] = list(selected_tests)
+    existing_ids = {
+        item if isinstance(item, str) else str(item.get("test_id") or item.get("name") or "")
+        for item in items_to_display
+    }
+    if selected_test_ids:
+        for user_tid in selected_test_ids:
+            if user_tid not in existing_ids:
+                items_to_display.append(user_tid)
+                existing_ids.add(user_tid)
+
     rows: List[Dict[str, str]] = []
     selected_set = set(selected_test_ids) if selected_test_ids is not None else None
     mem_subtests = completed_subtests or {}
 
-    for item in selected_tests:
+    for item in items_to_display:
         if isinstance(item, dict):
             test_id = (
                 item.get("test_id")
@@ -1954,6 +2088,11 @@ def render_attack_strategy_gate(
 ) -> bool:
     """
     Gate 1: require explicit human approval and test selection before Agent 2 executes.
+
+    The page-level hero owns the phase framing ("Human-in-the-Loop Review").
+    This function therefore only renders the numbered operational steps
+    (selection -> strategy details -> sign-off) and does not repeat the
+    intro copy shown above the fold.
     """
     plan = (
         result.get(
@@ -1980,16 +2119,12 @@ def render_attack_strategy_gate(
     except Exception:
         completed_subtests = {}
 
-    st.markdown(
-        "## Gate 1 · Attack Strategy Review"
-    )
-
     if checkpoint_loaded:
         st.html(
             f"""
             <div style="
-                background: #eef4f0;
-                border: 1px solid #c3d9cb;
+                background: rgba(61, 220, 132, 0.10);
+                border: 1px solid rgba(61, 220, 132, 0.35);
                 border-radius: 8px;
                 padding: 12px 16px;
                 margin-bottom: 16px;
@@ -1998,8 +2133,8 @@ def render_attack_strategy_gate(
                 gap: 12px;
             ">
                 <span style="
-                    background: #4f775b;
-                    color: white;
+                    background: #3ddc84;
+                    color: #0f0f10;
                     font-size: 11px;
                     font-weight: 700;
                     letter-spacing: 0.5px;
@@ -2007,7 +2142,7 @@ def render_attack_strategy_gate(
                     border-radius: 4px;
                     font-family: monospace;
                 ">CHECKPOINT LOADED</span>
-                <div style="font-size: 13px; color: #30342c;">
+                <div style="font-size: 13px; color: #d7d7d7;">
                     <strong>Audit Memory Active:</strong> Restored Agent 1 static analysis and attack strategy from persistent SQLite memory
                     (<code>{escape(audit_id[:12])}…</code> · {steps_count} steps cached). SHA-256 artifact integrity verified.
                 </div>
@@ -2020,8 +2155,8 @@ def render_attack_strategy_gate(
         st.html(
             f"""
             <div style="
-                background: #f0f6ff;
-                border: 1px solid #bfdbfe;
+                background: rgba(45, 212, 191, 0.10);
+                border: 1px solid rgba(45, 212, 191, 0.35);
                 border-radius: 8px;
                 padding: 12px 16px;
                 margin-bottom: 16px;
@@ -2030,8 +2165,8 @@ def render_attack_strategy_gate(
                 gap: 12px;
             ">
                 <span style="
-                    background: #2563eb;
-                    color: white;
+                    background: #2dd4bf;
+                    color: #0f0f10;
                     font-size: 11px;
                     font-weight: 700;
                     letter-spacing: 0.5px;
@@ -2039,7 +2174,7 @@ def render_attack_strategy_gate(
                     border-radius: 4px;
                     font-family: monospace;
                 ">DYNAMIC MEMORY ACTIVE</span>
-                <div style="font-size: 13px; color: #1e3a8a;">
+                <div style="font-size: 13px; color: #d7d7d7;">
                     <strong>Retained Dynamic Tests:</strong> Found <strong>{len(completed_subtests)}</strong> previously executed dynamic test(s) in audit memory (<code>{escape(stored_list)}</code>).
                     These tests are automatically retained. Any additional tests selected below will be executed in the container sandbox.
                 </div>
@@ -2047,14 +2182,16 @@ def render_attack_strategy_gate(
             """
         )
 
-    st.write(
-        "Agent 2 has prepared the dynamic testing strategy. "
-        "Review the proposed tests and authorize execution below."
-    )
+    # -------------------------------------------------------------
+    # Step 1 — Test selection (Agent 2 recommendations + full suite)
+    # -------------------------------------------------------------
+    ALL_DYNAMIC_TESTS = [
+        "V1_poisoning",
+        "V4_adversarial",
+        "V2_preprocessing",
+        "V3_validation",
+    ]
 
-    # -------------------------------------------------------------
-    # Test Selection (Strictly limited to Agent 2's proposed tests)
-    # -------------------------------------------------------------
     raw_proposed = (
         plan.get("selected_tests")
         or plan.get("planned_tests")
@@ -2067,35 +2204,49 @@ def render_attack_strategy_gate(
     ]
     proposed_test_ids = [t for t in proposed_test_ids if t]
 
-    st.markdown("### 1. Dynamic Test Selection")
-    st.caption(
-        "Agent 2 formulated the dynamic tests below based on vulnerabilities and components detected in your pipeline code. "
-        "Tests not included by Agent 2 cannot be selected because the corresponding pipeline component is absent from your code. "
-        "Select at least 1 test to authorize for execution:"
+    # Combine canonical dynamic tests with any custom tests formulated by Agent 2
+    all_available_options: List[str] = list(ALL_DYNAMIC_TESTS)
+    for tid in proposed_test_ids:
+        if tid not in all_available_options:
+            all_available_options.append(tid)
+
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">01</span>Select tests to authorize</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="step-caption">Agent 2 has recommended tests based on static analysis. '
+        'You can authorize, deselect, or add any dynamic tests below. Select at least one.</div>',
+        unsafe_allow_html=True,
     )
 
-    multiselect_key = "gate1_selected_tests_multiselect"
+    multiselect_key = "gate1_selected_tests_multiselect_v6"
     if multiselect_key not in st.session_state:
         st.session_state[multiselect_key] = list(proposed_test_ids)
 
-    # Ensure selection stays strictly within Agent 2's proposed tests
-    sanitized_selection = [t for t in st.session_state[multiselect_key] if t in proposed_test_ids]
-    if not sanitized_selection and proposed_test_ids and multiselect_key not in st.session_state:
+    # Ensure selection stays valid within all available options
+    sanitized_selection = [t for t in st.session_state[multiselect_key] if t in all_available_options]
+    if not sanitized_selection and proposed_test_ids:
         sanitized_selection = list(proposed_test_ids)
 
     user_selected_tests = st.multiselect(
         "Authorized dynamic tests for container sandbox:",
-        options=proposed_test_ids,
+        options=all_available_options,
         default=sanitized_selection,
         format_func=lambda tid: _resolve_test_metadata(tid, plan, result)[0],
-        help="Only tests formulated by Agent 2 for your pipeline can be selected. You must select at least 1 test.",
+        help="Select dynamic penetration tests to authorize for execution in the container sandbox. You can add tests beyond Agent 2's recommendations.",
         key=multiselect_key,
+        label_visibility="collapsed",
     )
 
     # -------------------------------------------------------------
-    # Strategy Review Table (with Target & Reason filled)
+    # Step 2 — Strategy review table (with Target & Reason filled)
     # -------------------------------------------------------------
-    st.markdown("### 2. Proposed Attack Strategy Details")
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">02</span>Strategy details</div>',
+        unsafe_allow_html=True,
+    )
+
     strategy_rows = _strategy_test_rows(
         plan=plan,
         result=result,
@@ -2130,42 +2281,78 @@ def render_attack_strategy_gate(
         )
 
     # -------------------------------------------------------------
-    # Reviewer Sign-Off & Confirmation Checkbox
+    # Step 3 — Reviewer sign-off & confirmation checkbox
     # -------------------------------------------------------------
-    st.markdown("### 3. Reviewer Sign-Off")
-    approval_key = "gate_1_confirmation"
+    st.markdown(
+        '<div class="step-heading"><span class="step-num">03</span>Sign-off</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Versioned keys so stale widget slots from earlier revisions of this
+    # function cannot be reused by Streamlit. The label must be identical
+    # in both branches below — changing it while keeping the same key would
+    # cause Streamlit to reattach the widget to an old element-tree slot.
+    approval_key = "gate_1_confirmation_v6"
     has_valid_selection = len(user_selected_tests) >= 1
+
+    CHECKBOX_LABEL = (
+        "I have reviewed the strategy above and authorize "
+        "the selected tests for execution."
+    )
 
     if not has_valid_selection:
         st.warning(
-            "Selection required: You must select at least 1 dynamic test before you can authorize execution."
+            "Select at least one test before authorizing execution."
         )
         approved = st.checkbox(
-            "I reviewed the proposed attack strategy and authorize Agent 2 to execute the selected dynamic tests.",
+            CHECKBOX_LABEL,
             value=False,
             disabled=True,
             key=approval_key,
         )
     else:
-        count_text = f"{len(user_selected_tests)} authorized dynamic test{'s' if len(user_selected_tests) > 1 else ''}"
         approved = st.checkbox(
-            f"I reviewed the proposed attack strategy and authorize Agent 2 to execute the {count_text}.",
+            CHECKBOX_LABEL,
             key=approval_key,
         )
 
     # -------------------------------------------------------------
-    # Approve & Reject Actions
+    # Approve & Reject actions (appears exactly once)
     # -------------------------------------------------------------
     def on_gate_1_reject() -> None:
         """Executed before rerun, safely resetting Gate 1 state without widget collision."""
         st.session_state.audit_plan = None
         st.session_state.audit_id = None
         st.session_state.audit_result = None
+        st.session_state.audit_executing = False
         st.session_state.report_signed_off = False
-        if "gate_1_confirmation" in st.session_state:
-            del st.session_state["gate_1_confirmation"]
-        if "gate1_selected_tests_multiselect" in st.session_state:
-            del st.session_state["gate1_selected_tests_multiselect"]
+
+        # Purge every key any past revision of this function might have used.
+        for stale_key in (
+            "gate_1_confirmation",
+            "gate_1_confirmation_v3",
+            "gate_1_confirmation_v4",
+            "gate_1_confirmation_v5",
+            "gate_1_confirmation_v6",
+            "gate1_selected_tests_multiselect",
+            "gate1_selected_tests_multiselect_v3",
+            "gate1_selected_tests_multiselect_v4",
+            "gate1_selected_tests_multiselect_v5",
+            "gate1_selected_tests_multiselect_v6",
+            "gate_1_approve",
+            "gate_1_approve_v3",
+            "gate_1_approve_v4",
+            "gate_1_approve_v5",
+            "gate_1_approve_v6",
+            "gate_1_reject",
+            "gate_1_reject_v3",
+            "gate_1_reject_v4",
+            "gate_1_reject_v5",
+            "gate_1_reject_v6",
+        ):
+            if stale_key in st.session_state:
+                del st.session_state[stale_key]
+
         for qk in ("audit_id", "audit_phase"):
             if qk in st.query_params:
                 del st.query_params[qk]
@@ -2174,18 +2361,18 @@ def render_attack_strategy_gate(
 
     with approve_col:
         approve_clicked = st.button(
-            "Approve strategy & run tests",
+            "Approve & run tests",
             type="primary",
             use_container_width=True,
             disabled=not approved or not has_valid_selection,
-            key="gate_1_approve",
+            key="gate_1_approve_v6",
         )
 
     with reject_col:
         st.button(
             "Reject & return to upload",
             use_container_width=True,
-            key="gate_1_reject",
+            key="gate_1_reject_v6",
             on_click=on_gate_1_reject,
         )
 
@@ -2436,4 +2623,3 @@ def render_audit_ledger_panel(
         st.dataframe(ledger_rows, use_container_width=True, hide_index=True)
     else:
         st.info("Step-level checkpoints are active and recorded atomically in .aegisml_runtime/audit_memory.db.")
-

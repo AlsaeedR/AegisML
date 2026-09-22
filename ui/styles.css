@@ -1,14 +1,49 @@
 :root {
-    --bg: #f4f4f0;
-    --card: #fafaf7;
-    --border: #d9dad4;
-    --text: #343730;
-    --muted: #8c8e87;
+    /* ---- Core AegisML palette ---- */
+    --bg: #121212;
+    --bg-soft: #171717;
+    --card: #1b1b1d;
+    --card-2: #202023;
+    --border: #2c2c2f;
+    --border-strong: #3a3a3e;
 
-    --dark: #30342c;
-    --green: #4f775b;
-    --gold: #a27d31;
-    --red: #9c4b40;
+    --text: #f3f3f1;
+    --text-soft: #d7d7d7;
+    --muted: #7c7c7c;
+
+    --accent: #ff751f;
+    --accent-strong: #ff8c3d;
+    --accent-dim: #cc5e18;
+    --accent-soft: rgba(255, 117, 31, 0.14);
+    --accent-border: rgba(255, 117, 31, 0.38);
+
+    --teal: #2dd4bf;
+    --teal-soft: rgba(45, 212, 191, 0.14);
+    --teal-border: rgba(45, 212, 191, 0.35);
+
+    /* Functional risk tiers — kept as semantic reds/ambers/greens on purpose;
+       everything else in the UI is built from the palette above. */
+    --critical: #ff4d4d;
+    --critical-soft: rgba(255, 77, 77, 0.14);
+    --high: #ff751f;
+    --high-soft: rgba(255, 117, 31, 0.14);
+    --medium: #ffb648;
+    --medium-soft: rgba(255, 182, 72, 0.14);
+    --low: #3ddc84;
+    --low-soft: rgba(61, 220, 132, 0.14);
+    --na: #7c7c7c;
+    --na-soft: rgba(124, 124, 124, 0.14);
+
+    --dark: #0f0f10;
+    --green: #3ddc84;
+    --gold: #ffb648;
+    --red: #ff4d4d;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px rgba(0, 0, 0, 0.18);
+    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(255, 117, 31, 0.08);
 }
 
 * {
@@ -17,6 +52,44 @@
 
 body {
     margin: 0;
+    background: var(--bg);
+}
+
+/* Bring the whole Streamlit shell into the dark AegisML theme, not just the
+   custom-rendered dashboard blocks. */
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+.main {
+    background: var(--bg) !important;
+}
+
+[data-testid="stAppViewContainer"] {
+    background-image:
+        radial-gradient(circle at 12% 0%, rgba(255, 117, 31, 0.07), transparent 42%),
+        radial-gradient(circle at 88% 8%, rgba(45, 212, 191, 0.05), transparent 38%);
+}
+
+::selection {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+}
+
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--muted);
 }
 
 .aegis-dashboard {
@@ -50,29 +123,32 @@ body {
 }
 
 .audit-logo {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
 
     display: flex;
     align-items: center;
     justify-content: center;
 
-    border-radius: 7px;
+    border-radius: 9px;
 
-    background: var(--dark);
-    color: white;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+    color: #17110a;
 
     font-size: 17px;
-    font-weight: 700;
+    font-weight: 800;
+
+    box-shadow: 0 4px 14px rgba(255, 117, 31, 0.35);
 }
 
 .audit-title {
     font-size: 17px;
     font-weight: 700;
+    letter-spacing: -0.2px;
 }
 
 .audit-path {
-    color: #9a9c95;
+    color: var(--muted);
     font-family: monospace;
     font-size: 14px;
 }
@@ -83,9 +159,9 @@ body {
     border: 1px solid var(--border);
     border-radius: 9px;
 
-    background: #f9f9f6;
+    background: var(--card);
 
-    color: #696c65;
+    color: var(--text-soft);
 
     font-family: monospace;
     font-size: 13px;
@@ -101,7 +177,8 @@ body {
 
     border-radius: 100%;
 
-    background: #3f7851;
+    background: var(--low);
+    box-shadow: 0 0 0 3px var(--low-soft);
 }
 
 
@@ -130,6 +207,8 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+
+    box-shadow: 0 0 0 1px var(--border), 0 12px 30px rgba(255, 117, 31, 0.12);
 }
 
 .risk-ring-inner {
@@ -138,13 +217,15 @@ body {
 
     border-radius: 50%;
 
-    background: var(--bg);
+    background: var(--bg-soft);
 
     display: flex;
     flex-direction: column;
 
     align-items: center;
     justify-content: center;
+
+    box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .risk-number {
@@ -155,17 +236,18 @@ body {
 
     line-height: 1;
 
-    color: #373a33;
+    color: var(--text);
 }
 
 .risk-label {
     margin-top: 5px;
 
-    color: #75776f;
+    color: var(--muted);
 
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
+    letter-spacing: 0.4px;
 }
 
 .risk-caption {
@@ -173,7 +255,7 @@ body {
 
     font-size: 12px;
 
-    color: #999b94;
+    color: var(--text-soft);
 }
 
 .summary-heading {
@@ -181,6 +263,7 @@ body {
 
     font-size: 25px;
     font-weight: 700;
+    letter-spacing: -0.3px;
 }
 
 .summary-text {
@@ -191,7 +274,7 @@ body {
     font-size: 15px;
     line-height: 1.65;
 
-    color: #75776f;
+    color: var(--text-soft);
 }
 
 
@@ -210,19 +293,19 @@ body {
 .risk-bar-title {
     margin-bottom: 8px;
 
-    color: #92948d;
+    color: var(--muted);
 
     font-size: 13px;
 }
 
 .risk-track {
-    height: 5px;
+    height: 6px;
 
     overflow: hidden;
 
     border-radius: 10px;
 
-    background: #dddeda;
+    background: var(--border);
 }
 
 .risk-fill {
@@ -232,15 +315,15 @@ body {
 }
 
 .fill-red {
-    background: var(--red);
+    background: var(--critical);
 }
 
 .fill-gold {
-    background: var(--gold);
+    background: var(--medium);
 }
 
 .fill-green {
-    background: var(--green);
+    background: var(--low);
 }
 
 .risk-score-small {
@@ -249,7 +332,7 @@ body {
     font-family: monospace;
     font-size: 13px;
 
-    color: #555850;
+    color: var(--text-soft);
 }
 
 
@@ -266,15 +349,15 @@ body {
 .audit-tab {
     padding: 17px 5px;
 
-    color: #93958e;
+    color: var(--muted);
 
     font-size: 14px;
 }
 
 .audit-tab.active {
-    color: #3c4c40;
+    color: var(--accent);
 
-    border-bottom: 2px solid #4d7056;
+    border-bottom: 2px solid var(--accent);
 }
 
 
@@ -302,9 +385,12 @@ body {
 
     margin-bottom: 18px;
 
-    color: #969890;
+    color: var(--muted);
 
     font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
 }
 
 
@@ -325,7 +411,7 @@ body {
 
     width: 1px;
 
-    background: #dbdcd6;
+    background: var(--border);
 }
 
 .pipeline-node {
@@ -344,13 +430,21 @@ body {
     margin-bottom: 18px;
 
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: 10px;
 
     background: var(--card);
+
+    transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.pipeline-node:hover {
+    border-color: var(--border-strong);
+    transform: translateX(2px);
 }
 
 .pipeline-node.flagged {
-    border-color: #e5aaa3;
+    border-color: rgba(255, 77, 77, 0.45);
+    box-shadow: 0 0 0 1px rgba(255, 77, 77, 0.12);
 }
 
 .node-alert {
@@ -359,19 +453,22 @@ body {
     right: -6px;
     top: -6px;
 
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
 
     border-radius: 50%;
 
-    background: #91473b;
-    color: white;
+    background: var(--critical);
+    color: #1a0000;
 
     font-size: 9px;
+    font-weight: 800;
 
     display: flex;
     align-items: center;
     justify-content: center;
+
+    box-shadow: 0 0 0 3px var(--bg);
 }
 
 .node-icon {
@@ -381,46 +478,53 @@ body {
     width: 36px;
     height: 36px;
 
-    border-radius: 7px;
+    border-radius: 8px;
 
-    background: #eeeee9;
+    background: var(--card-2);
+    border: 1px solid var(--border);
 
     display: flex;
     align-items: center;
     justify-content: center;
 
-    font-size: 17px;
+    font-size: 18px;
+    line-height: 1;
+    user-select: none;
+    overflow: hidden;
 }
 
 .node-name {
     font-size: 14px;
     font-weight: 600;
+    color: var(--text);
 }
 
 .node-meta {
     margin-top: 4px;
 
-    color: #999b94;
+    color: var(--muted);
 
     font-family: monospace;
     font-size: 11px;
 }
 
 .node-trust {
-    padding: 4px 8px;
+    padding: 4px 9px;
 
-    border-radius: 5px;
+    border-radius: 6px;
 
     font-family: monospace;
     font-size: 11px;
 
-    background: #eee9ca;
-    color: #87792e;
+    background: var(--medium-soft);
+    color: var(--medium);
+    border: 1px solid rgba(255, 182, 72, 0.3);
 }
 
 .node-trust.trusted {
-    background: #dfebe1;
-    color: #4a7257;
+    background: var(--low-soft);
+    color: var(--low);
+    border: 1px solid rgba(61, 220, 132, 0.3);
 }
 
 .attacker-note {
@@ -430,14 +534,14 @@ body {
 
     border-top: 1px solid var(--border);
 
-    color: #888a82;
+    color: var(--text-soft);
 
     font-size: 13px;
     line-height: 1.7;
 }
 
 .attacker-note strong {
-    color: #5c6157;
+    color: var(--accent);
 }
 
 
@@ -449,7 +553,7 @@ body {
     padding: 20px;
 
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
 
     background: var(--card);
 }
@@ -464,41 +568,49 @@ body {
 .finding-title {
     font-size: 16px;
     font-weight: 650;
+    color: var(--text);
 }
 
 .severity {
-    padding: 5px 9px;
+    padding: 5px 10px;
 
-    border-radius: 5px;
+    border-radius: 6px;
 
     font-family: monospace;
     font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 .severity-critical {
-    color: #964d41;
-    background: #f1ddda;
+    color: var(--critical);
+    background: var(--critical-soft);
+    border: 1px solid rgba(255, 77, 77, 0.3);
 }
 
 .severity-high {
-    color: #896d29;
-    background: #eee6cf;
+    color: var(--high);
+    background: var(--high-soft);
+    border: 1px solid rgba(255, 117, 31, 0.3);
 }
 
 .severity-medium {
-    color: #7d722c;
-    background: #eeebd2;
+    color: var(--medium);
+    background: var(--medium-soft);
+    border: 1px solid rgba(255, 182, 72, 0.3);
 }
 
 .severity-low {
-    color: #50715a;
-    background: #dde9df;
+    color: var(--low);
+    background: var(--low-soft);
+    border: 1px solid rgba(61, 220, 132, 0.3);
 }
 
 .finding-meta {
     margin: 7px 0 17px 79px;
 
-    color: #999b95;
+    color: var(--muted);
 
     font-family: monospace;
     font-size: 12px;
@@ -517,7 +629,7 @@ body {
     min-height: 116px;
     height: auto;
     padding: 15px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     box-sizing: border-box;
     overflow: visible;
 }
@@ -525,26 +637,30 @@ body {
 .root-cause {
     border: 1px solid var(--border);
 
-    background: #f9f9f6;
+    background: var(--bg-soft);
 
-    color: #72746d;
+    color: var(--text-soft);
 }
 
 .suggested-fix {
-    background: #30342c;
-    color: #d7dacd;
+    background: linear-gradient(160deg, #241608 0%, #1a1a1c 65%);
+    border: 1px solid var(--accent-border);
+    color: #ffe3cc;
 }
 
 .box-title {
     margin-bottom: 10px;
 
-    color: #979990;
+    color: var(--muted);
 
     font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 .suggested-fix .box-title {
-    color: #9fa498;
+    color: var(--accent-strong);
 }
 
 .box-content {
@@ -563,23 +679,23 @@ body {
     min-height: 116px;
     height: auto;
     padding: 15px;
-    border-radius: 7px;
-    border: 1px solid #c7dcce;
-    background: #edf5ef;
-    color: #385a43;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--teal-border);
+    background: linear-gradient(160deg, rgba(45, 212, 191, 0.08) 0%, var(--card-2) 65%);
+    color: #bdf5ee;
     box-sizing: border-box;
     overflow: visible;
 }
 
 .verification-outcome .box-title {
-    color: #436d4f;
-    font-weight: 600;
+    color: var(--teal);
+    font-weight: 700;
 }
 
 .verification-outcome .box-content {
     font-size: 13px;
     line-height: 1.65;
-    color: #33503b;
+    color: #d3f7f2;
     word-break: break-word;
     overflow-wrap: break-word;
 }
@@ -590,17 +706,18 @@ body {
     gap: 8px;
 
     margin-top: 13px;
+    flex-wrap: wrap;
 }
 
 .tag {
-    padding: 4px 8px;
+    padding: 4px 9px;
 
-    border: 1px solid #ccdbe2;
-    border-radius: 5px;
+    border: 1px solid var(--teal-border);
+    border-radius: 6px;
 
-    background: #e6edf1;
+    background: var(--teal-soft);
 
-    color: #577184;
+    color: var(--teal);
 
     font-family: monospace;
     font-size: 11px;
@@ -668,23 +785,24 @@ body {
 }
 
 .upload-logo {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    background: var(--dark);
-    color: white;
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+    color: #17110a;
     font-size: 19px;
-    font-weight: 700;
+    font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
     letter-spacing: -0.5px;
+    box-shadow: 0 4px 14px rgba(255, 117, 31, 0.35);
 }
 
 .upload-hero-title {
     margin: 0;
     padding: 0;
-    color: var(--dark);
+    color: var(--text);
     font-size: 32px;
     font-weight: 700;
     letter-spacing: -0.5px;
@@ -693,7 +811,7 @@ body {
 
 .upload-hero-subtitle {
     margin: 0;
-    color: #6f726a;
+    color: var(--text-soft);
     font-size: 15.5px;
     line-height: 1.6;
 }
@@ -702,8 +820,8 @@ body {
     padding: 9px 14px;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #f9f9f6;
-    color: #696c65;
+    background: var(--card);
+    color: var(--text-soft);
     font-family: monospace;
     font-size: 12.5px;
     font-weight: 600;
@@ -717,7 +835,8 @@ body {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #3f7851;
+    background: var(--low);
+    box-shadow: 0 0 0 3px var(--low-soft);
     display: inline-block;
 }
 
@@ -739,9 +858,10 @@ body {
 .asset-icon-box {
     width: 36px;
     height: 36px;
-    border-radius: 7px;
-    background: #eeeee9;
-    color: var(--dark);
+    border-radius: 8px;
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    color: var(--accent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -752,39 +872,39 @@ body {
 .asset-title {
     font-size: 15.5px;
     font-weight: 650;
-    color: var(--dark);
+    color: var(--text);
 }
 
 .asset-target-tag {
     padding: 3px 8px;
-    border-radius: 5px;
+    border-radius: 6px;
     font-family: monospace;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: 0.2px;
 }
 
 .tag-sast {
-    background: #e6edf1;
-    color: #446175;
-    border: 1px solid #c8d8e1;
+    background: var(--teal-soft);
+    color: var(--teal);
+    border: 1px solid var(--teal-border);
 }
 
 .tag-dast {
-    background: #eee6cf;
-    color: #846723;
-    border: 1px solid #dfd1ae;
+    background: var(--medium-soft);
+    color: var(--medium);
+    border: 1px solid rgba(255, 182, 72, 0.3);
 }
 
 .tag-data {
-    background: #dde9df;
-    color: #41684e;
-    border: 1px solid #bfd7c3;
+    background: var(--low-soft);
+    color: var(--low);
+    border: 1px solid rgba(61, 220, 132, 0.3);
 }
 
 .asset-desc {
     font-size: 12.5px;
-    color: #82857c;
+    color: var(--muted);
     line-height: 1.45;
     margin-bottom: 14px;
     min-height: 36px;
@@ -802,21 +922,22 @@ body {
 }
 
 .workflow-step-card {
-    background: #fbfbf8;
-    border: 1px solid #e1e2db;
-    border-radius: 9px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     padding: 16px;
-    transition: border-color 0.2s ease;
+    transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
 .workflow-step-card:hover {
-    border-color: #c4c6bc;
+    border-color: var(--accent-border);
+    transform: translateY(-2px);
 }
 
 .workflow-step-badge {
     font-family: monospace;
     font-size: 11px;
-    color: #8c8f86;
+    color: var(--accent);
     margin-bottom: 6px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -825,13 +946,13 @@ body {
 .workflow-step-name {
     font-size: 13.5px;
     font-weight: 650;
-    color: var(--dark);
+    color: var(--text);
     margin-bottom: 4px;
 }
 
 .workflow-step-desc {
     font-size: 12px;
-    color: #797c73;
+    color: var(--muted);
     line-height: 1.45;
 }
 
@@ -840,15 +961,15 @@ body {
 div[data-testid="stVerticalBlockBorderWrapper"] {
     background: var(--card) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 11px !important;
+    border-radius: 12px !important;
     padding: 18px 20px 20px !important;
-    box-shadow: 0 1px 3px rgba(48, 52, 44, 0.02) !important;
+    box-shadow: var(--shadow-card) !important;
     transition: all 0.2s ease !important;
 }
 
 div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-    border-color: #b8baa9 !important;
-    box-shadow: 0 4px 16px rgba(48, 52, 44, 0.05) !important;
+    border-color: var(--border-strong) !important;
+    box-shadow: var(--shadow-hover) !important;
 }
 
 div[data-testid="stFileUploader"] {
@@ -860,8 +981,8 @@ div[data-testid="stFileUploader"] {
 
 div[data-testid="stFileUploaderDropzone"],
 div[data-testid="stFileUploader"] section {
-    background: #f7f7f3 !important;
-    border: 1px dashed #cbccc3 !important;
+    background: var(--bg-soft) !important;
+    border: 1px dashed var(--border-strong) !important;
     border-radius: 8px !important;
     padding: 16px 14px !important;
     transition: all 0.2s ease !important;
@@ -869,20 +990,20 @@ div[data-testid="stFileUploader"] section {
 
 div[data-testid="stFileUploaderDropzone"]:hover,
 div[data-testid="stFileUploader"] section:hover {
-    background: #eeeee9 !important;
-    border-color: #92958c !important;
+    background: var(--card-2) !important;
+    border-color: var(--accent) !important;
 }
 
 div[data-testid="stFileUploaderDropzoneInstructions"] {
     font-size: 12.5px !important;
-    color: #696c65 !important;
+    color: var(--text-soft) !important;
 }
 
 div[data-testid="stFileUploaderDropzone"] button {
-    background: #ffffff !important;
-    border: 1px solid #cbccc3 !important;
+    background: var(--card) !important;
+    border: 1px solid var(--border-strong) !important;
     border-radius: 6px !important;
-    color: var(--dark) !important;
+    color: var(--text) !important;
     font-size: 12px !important;
     font-weight: 600 !important;
     padding: 4px 14px !important;
@@ -890,15 +1011,42 @@ div[data-testid="stFileUploaderDropzone"] button {
 }
 
 div[data-testid="stFileUploaderDropzone"] button:hover {
-    border-color: var(--dark) !important;
-    background: #fafaf7 !important;
+    border-color: var(--accent) !important;
+    background: var(--accent-soft) !important;
+    color: var(--accent-strong) !important;
+}
+
+/* Single-file uploaders do not need an add-another-file control. */
+div[data-testid="stFileUploaderDropzone"]:has([data-testid="stFileUploaderFileName"]) :is(button, [role="button"]):not([aria-label="Remove"]):not([aria-label="Delete"]) {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    opacity: 0 !important;
+}
+
+/* Streamlit versions render the add control with different icon markup. */
+div[data-testid="stFileUploaderDropzone"] span[aria-hidden="true"],
+div[data-testid="stFileUploaderDropzone"] svg,
+div[data-testid="stFileUploaderDropzone"] [data-testid="stElementToolbar"] {
+    display: none !important;
+}
+
+div[data-testid="stFileUploaderDropzone"] button[aria-label="Remove"] svg,
+div[data-testid="stFileUploaderDropzone"] button[aria-label="Delete"] svg {
+    display: block !important;
 }
 
 div[data-testid="stTextInput"] input {
-    background: #ffffff !important;
-    border: 1px solid #d9dad4 !important;
+    background: var(--bg-soft) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 7px !important;
-    color: var(--dark) !important;
+    color: var(--text) !important;
     font-family: monospace !important;
     font-size: 13.5px !important;
     padding: 9px 12px !important;
@@ -906,14 +1054,14 @@ div[data-testid="stTextInput"] input {
 }
 
 div[data-testid="stTextInput"] input:focus {
-    border-color: #4f775b !important;
-    box-shadow: 0 0 0 1px #4f775b !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1px var(--accent) !important;
 }
 
 div[data-testid="stTextInput"] label {
     font-size: 12px !important;
     font-weight: 600 !important;
-    color: #5c6157 !important;
+    color: var(--text-soft) !important;
     text-transform: uppercase !important;
     letter-spacing: 0.5px !important;
 }
@@ -922,7 +1070,7 @@ div[data-testid="stTextInput"] label {
 
 div[data-testid="stExpander"] {
     border: 1px solid var(--border) !important;
-    border-radius: 9px !important;
+    border-radius: 10px !important;
     background: var(--card) !important;
     margin: 12px 0 20px !important;
 }
@@ -930,8 +1078,59 @@ div[data-testid="stExpander"] {
 div[data-testid="stExpander"] summary {
     font-size: 13px !important;
     font-weight: 600 !important;
-    color: #5c6157 !important;
+    color: var(--text-soft) !important;
     letter-spacing: 0.2px !important;
+}
+
+/* Generic Streamlit primary buttons pick up the AegisML orange accent. */
+button[kind="primary"],
+div[data-testid="stBaseButton-primary"] button {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%) !important;
+    border: 1px solid var(--accent) !important;
+    color: #17110a !important;
+    font-weight: 700 !important;
+    box-shadow: 0 6px 18px rgba(255, 117, 31, 0.28) !important;
+    transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+button[kind="primary"]:hover,
+div[data-testid="stBaseButton-primary"] button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 10px 24px rgba(255, 117, 31, 0.36) !important;
+}
+
+button[kind="secondary"],
+div[data-testid="stBaseButton-secondary"] button {
+    background: var(--card) !important;
+    border: 1px solid var(--border-strong) !important;
+    color: var(--text-soft) !important;
+}
+
+button[kind="secondary"]:hover,
+div[data-testid="stBaseButton-secondary"] button:hover {
+    border-color: var(--accent) !important;
+    color: var(--accent-strong) !important;
+}
+
+div[data-testid="stMetric"] {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 12px 14px !important;
+}
+
+div[data-testid="stMetricLabel"] {
+    color: var(--muted) !important;
+}
+
+div[data-testid="stMetricValue"] {
+    color: var(--text) !important;
+}
+
+div[data-testid="stDataFrame"] {
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-sm) !important;
+    overflow: hidden !important;
 }
 
 
@@ -941,8 +1140,18 @@ div[data-testid="stExpander"] summary {
     margin: 22px 0 8px;
     padding: 18px 20px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-md);
     background: var(--card);
+}
+
+.agent-progress-active {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 .agent-progress-heading {
@@ -962,7 +1171,7 @@ div[data-testid="stExpander"] summary {
     align-items: center;
     gap: 12px;
     padding: 13px 0;
-    border-bottom: 1px solid #e6e7e1;
+    border-bottom: 1px solid var(--border);
 }
 
 .agent-progress-row:last-child {
@@ -975,16 +1184,23 @@ div[data-testid="stExpander"] summary {
     height: 9px;
     flex: 0 0 9px;
     border-radius: 50%;
-    background: #c8cac3;
+    background: var(--border-strong);
 }
 
 .agent-progress-marker.complete {
-    background: var(--green);
+    background: var(--low);
+    box-shadow: 0 0 0 4px var(--low-soft);
 }
 
 .agent-progress-marker.running {
-    background: var(--gold);
-    box-shadow: 0 0 0 4px rgba(162, 125, 49, 0.14);
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+    animation: aegis-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes aegis-pulse {
+    0%, 100% { box-shadow: 0 0 0 4px var(--accent-soft); }
+    50% { box-shadow: 0 0 0 7px rgba(255, 117, 31, 0.05); }
 }
 
 .agent-progress-copy {
@@ -1014,9 +1230,87 @@ div[data-testid="stExpander"] summary {
 }
 
 .agent-progress-status.complete {
-    color: var(--green);
+    color: var(--low);
 }
 
 .agent-progress-status.running {
-    color: var(--gold);
+    color: var(--accent);
+}
+
+/* =========================================================
+   ENHANCEMENT PASS · finding cards, empty states, step headers
+   ========================================================= */
+
+/* Severity left-stripe so findings are scannable without reading the pill */
+.finding-card {
+    position: relative;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.finding-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-card);
+    transform: translateY(-1px);
+}
+
+.finding-card[data-sev="critical"] { border-left: 3px solid var(--critical); }
+.finding-card[data-sev="high"]     { border-left: 3px solid var(--high); }
+.finding-card[data-sev="medium"]   { border-left: 3px solid var(--medium); }
+.finding-card[data-sev="low"]      { border-left: 3px solid var(--low); }
+.finding-card[data-sev="na"]       { border-left: 3px solid var(--border-strong); }
+
+/* Animated risk ring: background transitions when a new score is applied */
+.risk-ring {
+    transition: background 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Controls-outcome helper classes (replaces inline styles in dashboard.py) */
+.controls-verified    { color: var(--low); }
+.controls-partial     { color: var(--teal); }
+.controls-bypassed    { color: var(--critical); }
+.controls-ineffective { color: var(--muted); }
+
+/* Empty state for the findings column */
+.finding-empty {
+    padding: 40px 24px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-soft);
+    color: var(--muted);
+    text-align: center;
+    font-size: 13.5px;
+    line-height: 1.6;
+}
+
+.finding-empty strong {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 650;
+}
+
+/* Numbered step headers used inside Gate 1 */
+.step-heading {
+    margin: 22px 0 6px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -0.1px;
+}
+
+.step-heading .step-num {
+    display: inline-block;
+    min-width: 18px;
+    margin-right: 8px;
+    color: var(--accent);
+    font-family: monospace;
+    font-weight: 700;
+}
+
+.step-caption {
+    margin-bottom: 12px;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.55;
 }

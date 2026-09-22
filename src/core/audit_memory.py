@@ -5,11 +5,11 @@ import json
 import os
 import pickle
 import sqlite3
-import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +24,63 @@ class StaleArtifactError(RuntimeError):
     pass
 
 
-def _connect() -> sqlite3.Connection:
+def _init_tables(connection: sqlite3.Connection) -> None:
+    """Initializes all required SQLite schema tables with atomic transactions."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_sessions (
+            audit_id TEXT PRIMARY KEY,
+            session_blob BLOB NOT NULL,
+            updated_at TEXT
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_artifacts (
+            audit_id TEXT PRIMARY KEY,
+            code_hash TEXT,
+            model_hash TEXT,
+            dataset_hash TEXT,
+            registered_at TEXT
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_steps (
+            audit_id TEXT NOT NULL,
+            step_name TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            duration_seconds REAL,
+            step_blob BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (audit_id, step_name)
+        )
+        """
+    )
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_subtests (
+            audit_id TEXT NOT NULL,
+            test_id TEXT NOT NULL,
+            status TEXT,
+            severity TEXT,
+            evidence_blob BLOB NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (audit_id, test_id)
+        )
+        """
+    )
+    connection.commit()
+
+
+@contextmanager
+def _connect() -> Generator[sqlite3.Connection, None, None]:
     MEMORY_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -35,72 +91,28 @@ def _connect() -> sqlite3.Connection:
         timeout=30,
         check_same_thread=False,
     )
-    # Enable WAL mode for high concurrency and resilience
-    connection.execute("PRAGMA journal_mode=WAL;")
-    connection.execute("PRAGMA synchronous=NORMAL;")
-    return connection
+    try:
+        # Enable WAL mode for high concurrency and resilience
+        connection.execute("PRAGMA journal_mode=WAL;")
+        connection.execute("PRAGMA synchronous=NORMAL;")
+
+        # Auto-initialize schema if database is newly created or missing tables
+        row = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='audit_artifacts' LIMIT 1;"
+        ).fetchone()
+        if row is None:
+            _init_tables(connection)
+
+        yield connection
+    finally:
+        connection.close()
 
 
 def initialize_memory() -> None:
     """Initializes all required SQLite schema tables with atomic transactions."""
     with _LOCK:
         with _connect() as connection:
-            # Table 1: Complete audit sessions (backward compatibility)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_sessions (
-                    audit_id TEXT PRIMARY KEY,
-                    session_blob BLOB NOT NULL,
-                    updated_at TEXT
-                )
-                """
-            )
-
-            # Table 2: Cryptographic artifact hashes for integrity verification
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_artifacts (
-                    audit_id TEXT PRIMARY KEY,
-                    code_hash TEXT,
-                    model_hash TEXT,
-                    dataset_hash TEXT,
-                    registered_at TEXT
-                )
-                """
-            )
-
-            # Table 3: Fine-grained step-level checkpoints
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_steps (
-                    audit_id TEXT NOT NULL,
-                    step_name TEXT NOT NULL,
-                    agent_name TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    duration_seconds REAL,
-                    step_blob BLOB NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (audit_id, step_name)
-                )
-                """
-            )
-
-            # Table 4: Dynamic testing sub-tests (V1, V2, V3, V4 individual results)
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_subtests (
-                    audit_id TEXT NOT NULL,
-                    test_id TEXT NOT NULL,
-                    status TEXT,
-                    severity TEXT,
-                    evidence_blob BLOB NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (audit_id, test_id)
-                )
-                """
-            )
-
-            connection.commit()
+            _init_tables(connection)
 
 
 # =====================================================================
@@ -313,6 +325,57 @@ def get_step_checkpoint(
                 (audit_id, step_name),
             ).fetchone()
 
+            # Artifact-matching fallback if direct audit_id step not found
+            if not row:
+                art_row = connection.execute(
+                    "SELECT code_hash, model_hash, dataset_hash FROM audit_artifacts WHERE audit_id = ?",
+                    (audit_id,),
+                ).fetchone()
+                if art_row and art_row[0]:
+                    code_h, model_h, dataset_h = art_row[0], art_row[1] or "", art_row[2] or ""
+                    query = """
+                        SELECT s.step_blob, s.agent_name, s.duration_seconds
+                        FROM audit_steps s
+                        JOIN audit_artifacts a ON s.audit_id = a.audit_id
+                        WHERE a.code_hash = ?
+                          AND (? = '' OR a.model_hash = ? OR a.model_hash = '')
+                          AND (? = '' OR a.dataset_hash = ? OR a.dataset_hash = '')
+                          AND s.step_name = ?
+                          AND s.status = 'completed'
+                        ORDER BY s.created_at DESC
+                        LIMIT 1
+                    """
+                    row = connection.execute(
+                        query,
+                        (code_h, model_h, model_h, dataset_h, dataset_h, step_name),
+                    ).fetchone()
+                    if row:
+                        try:
+                            connection.execute(
+                                """
+                                INSERT INTO audit_steps (
+                                    audit_id, step_name, agent_name, status, duration_seconds, step_blob, created_at
+                                )
+                                VALUES (?, ?, ?, 'completed', ?, ?, ?)
+                                ON CONFLICT(audit_id, step_name) DO UPDATE SET
+                                    agent_name = excluded.agent_name,
+                                    status = excluded.status,
+                                    duration_seconds = excluded.duration_seconds,
+                                    step_blob = excluded.step_blob
+                                """,
+                                (
+                                    audit_id,
+                                    step_name,
+                                    row[1],
+                                    row[2],
+                                    row[0],
+                                    datetime.now(timezone.utc).isoformat(),
+                                ),
+                            )
+                            connection.commit()
+                        except Exception:
+                            pass
+
     if not row:
         return None
 
@@ -444,6 +507,7 @@ def get_subtests_by_artifacts(
     code: Optional[str] = None,
     model_path: Optional[str] = None,
     dataset_path: Optional[str] = None,
+    audit_id: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Finds and aggregates all completed dynamic sub-tests across all previous
@@ -452,6 +516,20 @@ def get_subtests_by_artifacts(
     code_h = compute_code_hash(code)
     model_h = compute_file_hash(model_path)
     dataset_h = compute_file_hash(dataset_path)
+
+    if not code_h and audit_id:
+        with _LOCK:
+            with _connect() as connection:
+                row = connection.execute(
+                    "SELECT code_hash, model_hash, dataset_hash FROM audit_artifacts WHERE audit_id = ?",
+                    (audit_id,),
+                ).fetchone()
+                if row and row[0]:
+                    code_h = row[0]
+                    if not model_h:
+                        model_h = row[1] or ""
+                    if not dataset_h:
+                        dataset_h = row[2] or ""
 
     if not code_h:
         return {}
@@ -495,12 +573,41 @@ def sync_subtests_for_audit(
     if not audit_id:
         return {}
     existing = get_all_subtests(audit_id)
-    artifact_subtests = get_subtests_by_artifacts(code, model_path, dataset_path)
+    artifact_subtests = get_subtests_by_artifacts(code, model_path, dataset_path, audit_id=audit_id)
     for tid, ev in artifact_subtests.items():
         if tid not in existing:
             save_subtest_checkpoint(audit_id, tid, ev)
             existing[tid] = ev
     return existing
+
+
+def is_post_gate1_fully_cached(
+    audit_id: str,
+    planned_tests: Optional[List[str]] = None,
+) -> bool:
+    """
+    Checks if all planned sub-tests and subsequent post-Gate 1 analysis
+    (forensic diagnosis and report synthesis) are already completely cached
+    and valid in audit memory.
+    """
+    if not audit_id:
+        return False
+
+    tests = planned_tests or ["V1_poisoning", "V2_preprocessing", "V3_validation", "V4_adversarial"]
+    subtests = get_all_subtests(audit_id)
+    for tid in tests:
+        if tid not in subtests:
+            return False
+
+    forensic = get_step_checkpoint(audit_id, "forensic_diagnosis")
+    if not forensic:
+        return False
+
+    report = get_step_checkpoint(audit_id, "synthesize_audit_report") or get_step_checkpoint(audit_id, "synthesize_report")
+    if not report:
+        return False
+
+    return True
 
 
 def invalidate_post_gate1_steps(

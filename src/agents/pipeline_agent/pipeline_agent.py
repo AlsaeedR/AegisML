@@ -25,6 +25,7 @@ from .tools import (
 )
 
 
+# ⭐⭐ STATION 1: this is the function you talk about in your script
 def node_extract_pipeline(state: PipelineAgentState) -> Dict[str, Any]:
     """Perception node: uses AST and NetworkX tools to construct the structural graph."""
     audit_id = state.get("audit_id")
@@ -35,7 +36,9 @@ def node_extract_pipeline(state: PipelineAgentState) -> Dict[str, Any]:
 
     t0 = time.time()
     code = state["code"]
+    # ⭐⭐ "run_ast_extractor converts the raw code into the AST"
     pipeline_graph = run_ast_extractor(code)
+    # ⭐⭐ "run_networkx_builder takes that AST and builds the graph structure"
     networkx_graph, topology = run_networkx_builder(pipeline_graph)
 
     result = {
@@ -102,6 +105,7 @@ def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
 
         messages: List[Any] = [system_msg, human_msg]
 
+        # 🔴 the ReAct loop: ask LLM, maybe call a tool, feed result back, repeat
         for _ in range(2):
             response = llm_with_tools.invoke(messages)
             messages.append(response)
@@ -155,6 +159,7 @@ def node_validate_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
             "status": "threat_model_validation_failed",
         }
 
+    # 🔴 grounds the LLM's claims against the real AST graph
     sem_valid, sem_errors = validate_threat_model_semantics(raw_threat_model, pipeline_graph)
     if not sem_valid:
         current_retries = state.get("retry_count", 0) + 1
@@ -184,12 +189,14 @@ def route_after_threat_model_validation(
     retry_count = state.get("retry_count", 0)
     max_retries = state.get("max_retries", 3)
 
+    # 🔴 retry logic: max 3 tries before giving up and moving on
     if has_errors and retry_count < max_retries:
         return "reason_threat_model"
 
     return "reason_vulnerabilities"
 
 
+# ⭐⭐ STATION 4: this is the second function you talk about in your script
 def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
     """Reasoning node: actively investigates pipeline controls before formulating findings."""
     audit_id = state.get("audit_id")
@@ -220,6 +227,7 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
             if validation_errors else ""
         )
 
+        # ⭐⭐ "It evaluates four core ML vulnerability classes: V1... V2... V3... V4..."
         system_msg = SystemMessage(content=(
             "You are the AegisML Pipeline Vulnerability Auditor.\n"
             "Analyze the pipeline against the four MVP vulnerability classes:\n"
@@ -305,6 +313,7 @@ def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
             "status": "vulnerability_validation_failed",
         }
 
+    # 🔴 the smart auto-override: no inference call found → V4 forced to "not_applicable"
     has_inference_surface = any(
         str(node.get("type", "")).lower() == "inference"
         or str(node.get("component_type", "")).lower() == "inference"
@@ -354,6 +363,7 @@ def node_finalize_agent_results(state: PipelineAgentState) -> Dict[str, Any]:
     return result
 
 
+# 🔴 wires all the stations above together into one graph, in the right order
 def build_pipeline_agent_graph():
     """Assembles and compiles the StateGraph for Agent 1."""
     workflow = StateGraph(PipelineAgentState)
