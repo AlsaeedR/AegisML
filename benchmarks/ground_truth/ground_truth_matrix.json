@@ -1,0 +1,258 @@
+{
+  "CASE-01": {
+    "name": "all_defended",
+    "folder": "benchmarks/pipelines/all_defended",
+    "description": "Fully hardened pipeline with SHA-256 integrity checks, NFKC text allowlisting, schema assertions, and prototype-margin classifier.",
+    "lines_of_code": 405,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["SHA-256 dataset hash verification", "Verified training provenance ledger"]
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Strict character whitelisting", "Non-string type guard", "Bounded length clipping"]
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Explicit schema assertion", "Null and empty string guard", "Fail-safe exception boundary"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Fixed vocabulary prototype classifier", "Large margin feature separation"]
+      }
+    }
+  },
+  "CASE-02": {
+    "name": "v1_data_poisoning",
+    "folder": "benchmarks/pipelines/v1_data_poisoning",
+    "description": "Fake news text classifier with unmitigated CSV ingestion and no cryptographic hash verification, vulnerable to training data poisoning.",
+    "lines_of_code": 104,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Standard English stop-word filtering"]
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["dropna subset handling"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["PassiveAggressive regularized margin"]
+      }
+    }
+  },
+  "CASE-03": {
+    "name": "v2_preprocessing",
+    "folder": "benchmarks/pipelines/v2_preprocessing",
+    "description": "Pipeline vulnerable to preprocessing crashes under punctuation, control characters, non-ASCII symbols, and buffer limits.",
+    "lines_of_code": 123,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Clean labeled split"]
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Type string check"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Sublinear TF feature scaling"]
+      }
+    }
+  },
+  "CASE-04": {
+    "name": "v3_data_validation",
+    "folder": "benchmarks/pipelines/v3_data_validation",
+    "description": "Pipeline with protected ingestion and preprocessing, but intentionally vulnerable to data validation weaknesses and null exceptions.",
+    "lines_of_code": 323,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Cryptographic SHA-256 verification"]
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Safe Unicode NFKC normalization"]
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["NearestCentroid prototype classifier"]
+      }
+    }
+  },
+  "CASE-05": {
+    "name": "v4_adversarial",
+    "folder": "benchmarks/pipelines/v4_adversarial",
+    "description": "Text classifier protected against preprocessing attacks and validation flaws, but vulnerable to adversarial boundary evasion.",
+    "lines_of_code": 510,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Bounded dataset ingestion"]
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["NFKC Unicode normalization", "Length bounding"]
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["DataValidationError schema checks", "Strict label whitelisting"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      }
+    }
+  },
+  "CASE-06": {
+    "name": "v4_v1_compound",
+    "folder": "benchmarks/pipelines/v4_v1_compound",
+    "description": "Pipeline vulnerable to both adversarial boundary perturbation (V4) and unverified training data poisoning (V1).",
+    "lines_of_code": 527,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Length capping", "Unicode NFKC normalization"]
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Allowed label set enforcement"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      }
+    }
+  },
+  "CASE-07": {
+    "name": "inference_only_serving",
+    "folder": "benchmarks/pipelines/inference_only",
+    "description": "Standalone offline batch inference pipeline without training ingestion; V1 Data Poisoning is not applicable.",
+    "lines_of_code": 30,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "not_applicable",
+        "expected_empirical_degradation": "none",
+        "mitigating_controls": []
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "moderate",
+        "mitigating_controls": []
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Pydantic payload schema validation"]
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      }
+    }
+  },
+  "CASE-08": {
+    "name": "completely_unhardened_baseline",
+    "folder": "benchmarks/pipelines/completely_unhardened",
+    "description": "Baseline unhardened ML pipeline with untrusted CSV ingestion, naive preprocessing, no schema checks, and fragile linear decision boundary.",
+    "lines_of_code": 35,
+    "expected_vulnerabilities": {
+      "V1": {
+        "category": "Data Poisoning",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      },
+      "V2": {
+        "category": "Preprocessing Attack Surface",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "moderate",
+        "mitigating_controls": []
+      },
+      "V3": {
+        "category": "Data Validation Weaknesses",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "moderate",
+        "mitigating_controls": []
+      },
+      "V4": {
+        "category": "Adversarial Robustness",
+        "expected_status": "vulnerable",
+        "expected_empirical_degradation": "high",
+        "mitigating_controls": []
+      }
+    }
+  }
+}

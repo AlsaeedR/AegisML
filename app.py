@@ -1,11 +1,16 @@
 import io
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import queue
 import threading
 import time
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 import requests
 import streamlit as st
@@ -90,7 +95,8 @@ def is_final_audit_payload(
     if not isinstance(payload, dict):
         return False
 
-    if payload.get("status") != "awaiting_gate_2":
+    status = str(payload.get("status", "")).lower()
+    if status not in {"awaiting_gate_2", "completed", "signed_off"}:
         return False
 
     report = payload.get("report")
@@ -291,54 +297,84 @@ def clean_executive_summary(summary: Any) -> str:
         flags=re.IGNORECASE,
     )
 
+
 def render_agent_progress(
     progress_placeholder: Any,
-    events: list[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+    active_override: Optional[str] = None,
 ) -> None:
-    """Render the current multi-agent execution timeline in place."""
-    stages = [
-        ("Agent 1", "Static threat analysis", "Complete"),
-        ("Agent 2", "Dynamic security testing", "Waiting"),
-        ("Agent 2", "Forensic diagnosis", "Waiting"),
-        ("Agent 3", "Evidence-informed reporting", "Waiting"),
-    ]
+    """
+    Render the current multi-agent execution timeline in place.
 
-    latest_by_step = {
-        event.get("step"): event
-        for event in events
-        if event.get("step")
+    Handles dynamically-named steps emitted by the backend: any event
+    carrying a `step` field becomes a row, in the order that step first
+    appeared. The four canonical AegisML stages are pre-seeded so the
+    panel is populated before the first event arrives.
+
+    The page hero already carries the "Executing Security Audit" heading,
+    so this panel omits its own heading.
+    """
+
+    CANONICAL_AGENTS = {
+        "Static threat analysis": "Agent 1",
+        "Dynamic security testing": "Agent 2",
+        "Forensic diagnosis": "Agent 2",
+        "Evidence-informed reporting": "Agent 3",
     }
 
+    # Track the latest event per step name, plus the order steps appeared.
+    latest_by_step: Dict[str, Dict[str, Any]] = {}
+    step_order: List[str] = []
+    active_steps: Dict[str, str] = {}
+
+    for event in events:
+        step = event.get("step")
+        if not step:
+            continue
+        if step not in latest_by_step:
+            step_order.append(step)
+        latest_by_step[step] = event
+        if event.get("event") == "agent_step_started":
+            active_steps[step] = event.get("agent", "Agent")
+        elif event.get("event") in ("agent_step_finished", "step_resumed_from_checkpoint"):
+            active_steps.pop(step, None)
+
+    # Build the ordered list: canonical stages first (in their declared
+    # order), then any extra step names the backend emitted, in arrival
+    # order.
+    ordered: List[tuple] = []
+
+    for name, agent in CANONICAL_AGENTS.items():
+        ordered.append((agent, name))
+
+    for name in step_order:
+        if name not in CANONICAL_AGENTS:
+            agent = latest_by_step[name].get("agent", "Agent")
+            ordered.append((agent, name))
+
     rows = []
-    for agent, step, default_status in stages:
+    all_steps_completed = True
+    for index, (agent, step) in enumerate(ordered):
         event = latest_by_step.get(step, {})
         event_type = event.get("event")
 
         if event_type == "agent_step_started":
             status = "Running"
             marker = "running"
-        elif event_type == "agent_step_finished":
-            status = str(
-                event.get(
-                    "status",
-                    "Complete",
-                )
-            ).replace(
-                "_",
-                " ",
-            ).title()
-            marker = "complete"
-        elif default_status == "Complete":
-            status = "Complete"
+            all_steps_completed = False
+        elif event_type in ("agent_step_finished", "step_resumed_from_checkpoint"):
+            status = (
+                str(event.get("status", "Complete"))
+                .replace("_", " ")
+                .title()
+            )
             marker = "complete"
         else:
-            status = default_status
+            status = "Waiting"
             marker = "waiting"
+            all_steps_completed = False
 
-        message = event.get(
-            "message",
-            "",
-        )
+        message = event.get("message", "")
 
         rows.append(
             f"""
@@ -353,14 +389,32 @@ def render_agent_progress(
             """
         )
 
+    if active_override:
+        active_label = active_override
+    elif active_steps:
+        active_step = next(reversed(active_steps))
+        active_label = f"Active: {active_steps[active_step]} · {active_step}"
+    elif all_steps_completed:
+        active_label = "All agents completed successfully"
+    else:
+        next_pending = None
+        for agent_cand, step_cand in ordered:
+            step_ev = latest_by_step.get(step_cand, {})
+            if step_ev.get("event") not in ("agent_step_finished", "step_resumed_from_checkpoint"):
+                next_pending = (agent_cand, step_cand)
+                break
+        if next_pending:
+            active_label = f"Active: {next_pending[0]} · {next_pending[1]}"
+        else:
+            active_label = "Active: Executing security audit pipeline..."
+
     progress_placeholder.html(
-        """
+        f"""
         <div class="agent-progress-panel">
-            <div class="agent-progress-heading">Audit execution</div>
-            <div class="agent-progress-subheading">Live agent activity</div>
-            {rows}
+            <div class="agent-progress-active">{active_label}</div>
+            {"".join(rows)}
         </div>
-        """.format(rows="".join(rows)),
+        """
     )
 
 
@@ -372,7 +426,25 @@ def run_approved_audit_with_progress(
     """Execute the approved audit while streaming agent telemetry to the UI."""
     event_queue: queue.Queue[Dict[str, Any]] = queue.Queue()
     response_holder: Dict[str, Any] = {}
-    events: list[Dict[str, Any]] = []
+    events: list[Dict[str, Any]] = [
+        {
+            "event": "agent_step_finished",
+            "agent": "Agent 1",
+            "step": "Static threat analysis",
+            "status": "completed",
+            "message": "Static threat analysis completed and passed to Agent 2.",
+        },
+        {
+            "event": "agent_step_started",
+            "agent": "Agent 2",
+            "step": "Dynamic security testing",
+            "message": "Initializing testing sandbox and test harness...",
+        },
+    ]
+    step_started_at: Dict[str, float] = {
+        "Dynamic security testing": time.time(),
+    }
+    MIN_RUNNING_TIME = 0.85
 
     def read_telemetry() -> None:
         try:
@@ -402,33 +474,108 @@ def run_approved_audit_with_progress(
         except Exception as exc:
             response_holder["error"] = exc
 
+    def process_incoming_event(ev: Dict[str, Any]) -> None:
+        ev_type = ev.get("event")
+        step_name = ev.get("step")
+        if not step_name or ev_type == "done":
+            return
+
+        agent_name = ev.get("agent", "Agent")
+
+        if ev_type == "agent_step_started":
+            step_started_at[step_name] = time.time()
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
+        elif ev_type in ("agent_step_finished", "step_resumed_from_checkpoint"):
+            if step_name not in step_started_at:
+                events.append({
+                    "event": "agent_step_started",
+                    "agent": agent_name,
+                    "step": step_name,
+                    "message": f"{agent_name} executing {step_name}...",
+                })
+                step_started_at[step_name] = time.time()
+                render_agent_progress(progress_placeholder, events)
+                time.sleep(MIN_RUNNING_TIME)
+            else:
+                elapsed = time.time() - step_started_at[step_name]
+                if elapsed < MIN_RUNNING_TIME:
+                    time.sleep(MIN_RUNNING_TIME - elapsed)
+
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
+        else:
+            events.append(ev)
+            render_agent_progress(progress_placeholder, events)
+
     telemetry_thread = threading.Thread(target=read_telemetry, daemon=True)
     execute_thread = threading.Thread(target=execute_audit, daemon=True)
     telemetry_thread.start()
     execute_thread.start()
 
     render_agent_progress(progress_placeholder, events)
+
     while execute_thread.is_alive() or not event_queue.empty():
-        try:
-            while True:
+        while not event_queue.empty():
+            try:
                 event = event_queue.get_nowait()
-                if event.get("event") != "done":
-                    events.append(event)
-                render_agent_progress(progress_placeholder, events)
-        except queue.Empty:
-            pass
-        time.sleep(0.15)
+                process_incoming_event(event)
+            except queue.Empty:
+                break
+
+        time.sleep(0.1)
 
     execute_thread.join()
+    telemetry_thread.join(timeout=1.5)
+
     while not event_queue.empty():
-        event = event_queue.get_nowait()
-        if event.get("event") != "done":
-            events.append(event)
-    render_agent_progress(progress_placeholder, events)
+        try:
+            event = event_queue.get_nowait()
+            process_incoming_event(event)
+        except queue.Empty:
+            break
+
+    resp = response_holder.get("response")
+    if resp is not None and getattr(resp, "status_code", None) == 200:
+        existing_finished_steps = {
+            ev.get("step")
+            for ev in events
+            if ev.get("event") in ("agent_step_finished", "step_resumed_from_checkpoint")
+        }
+
+        canonical_steps = [
+            ("Agent 2", "Dynamic security testing", "Empirical penetration testing finished."),
+            ("Agent 2", "Forensic diagnosis", "Forensic diagnosis completed."),
+            ("Agent 3", "Evidence-informed reporting", "Final security report is ready."),
+        ]
+
+        for agent_name, step_name, msg in canonical_steps:
+            if step_name not in existing_finished_steps:
+                process_incoming_event({
+                    "event": "agent_step_finished",
+                    "agent": agent_name,
+                    "step": step_name,
+                    "status": "completed",
+                    "message": msg,
+                })
+
+        render_agent_progress(
+            progress_placeholder,
+            events,
+            active_override="All agents completed successfully",
+        )
+        time.sleep(1.2)
+    else:
+        render_agent_progress(progress_placeholder, events)
+
+    st.session_state["_debug_events"] = list(events)
 
     if "error" in response_holder:
         raise response_holder["error"]
     return response_holder["response"]
+
 
 # ---------------------------------------------------------
 # PDF report generation
@@ -1316,6 +1463,10 @@ st.markdown(
 # ---------------------------------------------------------
 # Load dashboard stylesheet
 # ---------------------------------------------------------
+# NOTE: Do not cache this read. During development the cache
+# prevents CSS changes from taking effect on the next rerun,
+# which previously caused the "+" button CSS to appear stuck.
+# The read is a few milliseconds — cheap enough to do every run.
 
 css_path = (
     Path(__file__).parent
@@ -1346,6 +1497,8 @@ if "report_signed_off" not in st.session_state:
     st.session_state.report_signed_off = False
 if "show_docker_dialog" not in st.session_state:
     st.session_state.show_docker_dialog = False
+if "audit_executing" not in st.session_state:
+    st.session_state.audit_executing = False
 
 if st.session_state.get("show_docker_dialog", False):
     show_docker_unavailable_dialog()
@@ -1387,106 +1540,179 @@ if (
 # =========================================================
 
 if st.session_state.audit_result is None and st.session_state.audit_plan is not None:
-    is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
-    gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
+    is_executing = st.session_state.get("audit_executing", False)
 
+    if not is_executing:
+        is_ckpt = st.session_state.audit_plan.get("checkpoint_loaded", False)
+        gate_badge = "GATE 1 &middot; CHECKPOINT LOADED" if is_ckpt else "GATE 1 &middot; APPROVAL REQUIRED"
+
+        # Wrap the whole Gate 1 body inside one atomic keyed container.
+        # Streamlit treats each keyed container as a single element with its
+        # own identity, so the entire block is placed at the container's
+        # code position — not at the cached position of any inner widget.
+        hitl_container = st.container(key="hitl_root_v5")
+
+        with hitl_container:
+            st.html(
+                f"""
+                <div class="upload-hero">
+                    <div class="upload-hero-left">
+                        <div class="upload-brand-row">
+                            <div class="upload-logo">A</div>
+                            <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                        </div>
+                        <p class="upload-hero-subtitle">
+                            Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                        </p>
+                    </div>
+                    <div class="upload-status-badge">{gate_badge}</div>
+                </div>
+                """
+            )
+
+            approved = render_attack_strategy_gate(st.session_state.audit_plan)
+
+        if approved:
+            if not check_docker_available():
+                st.session_state.show_docker_dialog = True
+                st.rerun()
+
+            st.session_state.audit_executing = True
+            remember_audit_resume_state(
+                st.session_state.audit_id,
+                "executing",
+            )
+            st.rerun()
+
+        st.stop()
+
+    # ---------------------------------------------------------
+    # Execution phase
+    # ---------------------------------------------------------
     st.html(
-        f"""
+        """
         <div class="upload-hero">
             <div class="upload-hero-left">
                 <div class="upload-brand-row">
                     <div class="upload-logo">A</div>
-                    <h1 class="upload-hero-title">Human-in-the-Loop Review</h1>
+                    <h1 class="upload-hero-title">Executing Security Audit</h1>
                 </div>
                 <p class="upload-hero-subtitle">
-                    Agent 1 analysis is complete. Review Agent 2's proposed attack strategy before any dynamic tests execute.
+                    Running approved tests and correlating evidence. This may take several minutes.
                 </p>
             </div>
-            <div class="upload-status-badge">{gate_badge}</div>
+            <div class="upload-status-badge">DYNAMIC TESTS ACTIVE</div>
         </div>
         """
     )
 
-    render_interactive_pipeline_graph(st.session_state.audit_plan)
-
-    if render_attack_strategy_gate(st.session_state.audit_plan):
-        if not check_docker_available():
-            st.session_state.show_docker_dialog = True
-            st.rerun()
-
-        remember_audit_resume_state(
-            st.session_state.audit_id,
-            "executing",
+    # Gather the authorized test list before rendering the context card.
+    selected_tests = None
+    if isinstance(st.session_state.audit_plan, dict):
+        strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
+        selected_tests = (
+            strat_plan.get("selected_tests")
+            or st.session_state.audit_plan.get("selected_tests")
         )
 
-        progress_placeholder = st.empty()
+    active_audit_id = st.session_state.audit_id or ""
+    test_count = len(selected_tests) if selected_tests else 0
 
-        selected_tests = None
-        if isinstance(st.session_state.audit_plan, dict):
-            strat_plan = st.session_state.audit_plan.get("attack_strategy_plan") or {}
-            selected_tests = strat_plan.get("selected_tests") or st.session_state.audit_plan.get("selected_tests")
+    # Audit context card — sits between the hero and the live timeline so the
+    # progress panel is no longer the first widget on the page.
+    with st.container(border=True):
+        ctx_col1, ctx_col2, ctx_col3 = st.columns(3)
+        ctx_col1.metric(
+            "Audit session",
+            (active_audit_id[:12] + "…") if active_audit_id else "—",
+        )
+        ctx_col2.metric(
+            "Authorized tests",
+            test_count,
+        )
+        ctx_col3.metric(
+            "Phase",
+            "Running",
+        )
 
-        try:
-            with st.spinner(
-                "Running approved dynamic tests and evidence correlation..."
+    st.markdown("#### Live agent execution")
+    progress_placeholder = st.empty()
+
+    try:
+        # The live progress panel is the loader — no separate spinner is used,
+        # which previously caused two overlapping loading indicators to appear.
+        response = run_approved_audit_with_progress(
+            st.session_state.audit_id,
+            progress_placeholder,
+            selected_tests=selected_tests,
+        )
+
+        # TEMPORARY DEBUG — shows every event the backend actually sent,
+        # in arrival order. Remove once backend telemetry is verified.
+        if "_debug_events" in st.session_state:
+            with st.expander("Raw telemetry events (debug)", expanded=True):
+                st.caption(
+                    f"Total events received from backend: "
+                    f"{len(st.session_state['_debug_events'])}"
+                )
+                st.json(st.session_state["_debug_events"])
+
+        if response.status_code == 200:
+            payload = response.json()
+
+            if is_final_audit_payload(
+                payload
             ):
-                response = run_approved_audit_with_progress(
-                    st.session_state.audit_id,
-                    progress_placeholder,
-                    selected_tests=selected_tests,
-                )
-
-            if response.status_code == 200:
-                payload = response.json()
-
-                if is_final_audit_payload(
-                    payload
-                ):
-                    st.session_state.audit_result = payload
-                    st.session_state.audit_plan = None
-                    st.session_state.report_signed_off = False
-
-                    remember_audit_resume_state(
-                        st.session_state.audit_id,
-                        "report",
-                    )
-
-                    st.rerun()
-
-                else:
-                    st.warning(
-                        "The audit stopped before the final report was ready. "
-                        "No partial results were published. "
-                        "Your checkpoint is saved."
-                    )
-                    st.session_state.audit_plan = None
-                    st.rerun()
-
-            elif response.status_code == 409:
-                st.info(
-                    "This audit is already running. "
-                    "Wait for it to finish, then use Resume audit."
-                )
+                st.session_state.audit_result = payload
                 st.session_state.audit_plan = None
+                st.session_state.audit_executing = False
+                st.session_state.report_signed_off = False
+
+                remember_audit_resume_state(
+                    st.session_state.audit_id,
+                    "report",
+                )
+
                 st.rerun()
 
             else:
                 st.warning(
-                    "The audit was interrupted before completion. "
+                    "The audit stopped before the final report was ready. "
                     "No partial results were published. "
                     "Your checkpoint is saved."
                 )
                 st.session_state.audit_plan = None
+                st.session_state.audit_executing = False
                 st.rerun()
 
-        except requests.exceptions.RequestException:
+        elif response.status_code == 409:
+            st.info(
+                "This audit is already running. "
+                "Wait for it to finish, then use Resume audit."
+            )
+            st.session_state.audit_plan = None
+            st.session_state.audit_executing = False
+            st.rerun()
+
+        else:
             st.warning(
-                "The API connection was interrupted. "
+                "The audit was interrupted before completion. "
                 "No partial results were published. "
                 "Your checkpoint is saved."
             )
             st.session_state.audit_plan = None
+            st.session_state.audit_executing = False
             st.rerun()
+
+    except requests.exceptions.RequestException:
+        st.warning(
+            "The API connection was interrupted. "
+            "No partial results were published. "
+            "Your checkpoint is saved."
+        )
+        st.session_state.audit_plan = None
+        st.session_state.audit_executing = False
+        st.rerun()
 
     st.stop()
 
@@ -1667,7 +1893,7 @@ if st.session_state.audit_result is None:
     )
 
     # -----------------------------------------------------
-    # File uploads
+    # File uploads (exactly one file per category)
     # -----------------------------------------------------
 
     col1, col2, col3 = st.columns(
@@ -1692,11 +1918,15 @@ if st.session_state.audit_result is None:
                 """
             )
             pipeline_file = st.file_uploader(
-                "Pipeline source",
+                "Pipeline source · 1 file",
                 type=["py"],
-                help="Python ML pipeline source file.",
+                accept_multiple_files=False,
+                key="upload_pipeline_source",
+                help="One Python ML pipeline source file (.py).",
                 label_visibility="collapsed",
             )
+            if pipeline_file is not None:
+                st.caption(f"Attached: `{pipeline_file.name}`")
 
     with col2:
         with st.container(border=True):
@@ -1715,11 +1945,15 @@ if st.session_state.audit_result is None:
                 """
             )
             model_file = st.file_uploader(
-                "Trained model",
+                "Trained model · 1 file",
                 type=["pkl"],
-                help="Pickle model generated by the ML pipeline.",
+                accept_multiple_files=False,
+                key="upload_trained_model",
+                help="One pickle model file (.pkl).",
                 label_visibility="collapsed",
             )
+            if model_file is not None:
+                st.caption(f"Attached: `{model_file.name}`")
 
     with col3:
         with st.container(border=True):
@@ -1738,11 +1972,15 @@ if st.session_state.audit_result is None:
                 """
             )
             dataset_file = st.file_uploader(
-                "Dataset",
+                "Evaluation dataset · 1 file",
                 type=["csv"],
-                help="CSV dataset used by the model.",
+                accept_multiple_files=False,
+                key="upload_evaluation_dataset",
+                help="One CSV evaluation dataset (.csv).",
                 label_visibility="collapsed",
             )
+            if dataset_file is not None:
+                st.caption(f"Attached: `{dataset_file.name}`")
 
     st.write("")
 
@@ -2215,4 +2453,3 @@ else:
                 use_container_width=True,
                 disabled=not st.session_state.report_signed_off,
             )
-

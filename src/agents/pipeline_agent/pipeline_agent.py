@@ -131,13 +131,22 @@ def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
             if tool_findings:
                 tool_context += "\n".join(tool_findings) + "\n"
 
-    threat_model_raw = generate_threat_model_step(
-        code=code,
-        pipeline_graph=pipeline_graph,
-        graph_topology=topology,
-        validation_errors=validation_errors,
-        tool_context=tool_context or None,
-    )
+    try:
+        threat_model_raw = generate_threat_model_step(
+            code=code,
+            pipeline_graph=pipeline_graph,
+            graph_topology=topology,
+            validation_errors=validation_errors,
+            tool_context=tool_context or None,
+        )
+    except Exception as exc:
+        current_retries = state.get("retry_count", 0) + 1
+        return {
+            "threat_model": {},
+            "validation_errors": f"Failed to parse LLM output into JSON: {exc}. Output must strictly be valid JSON.",
+            "retry_count": current_retries,
+            "status": "threat_model_validation_failed",
+        }
 
     result = {"threat_model": threat_model_raw}
     if audit_id:
@@ -147,6 +156,13 @@ def node_reason_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
 
 def node_validate_threat_model(state: PipelineAgentState) -> Dict[str, Any]:
     """Validation node: syntactic and semantic verification with diagnostic registration."""
+    if state.get("status") == "threat_model_validation_failed" and state.get("validation_errors"):
+        return {
+            "validation_errors": state.get("validation_errors"),
+            "retry_count": state.get("retry_count", 0),
+            "status": "threat_model_validation_failed",
+        }
+
     raw_threat_model = state.get("threat_model", {})
     pipeline_graph = state.get("pipeline_graph", {})
 
@@ -276,13 +292,22 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
             if tool_findings:
                 tool_context += "\n".join(tool_findings) + "\n"
 
-    vulnerabilities_raw = generate_vulnerabilities_step(
-        code=code,
-        pipeline_graph=pipeline_graph,
-        threat_model=threat_model,
-        validation_errors=validation_errors,
-        tool_context=tool_context or None,
-    )
+    try:
+        vulnerabilities_raw = generate_vulnerabilities_step(
+            code=code,
+            pipeline_graph=pipeline_graph,
+            threat_model=threat_model,
+            validation_errors=validation_errors,
+            tool_context=tool_context or None,
+        )
+    except Exception as exc:
+        current_retries = state.get("retry_count", 0) + 1
+        return {
+            "vulnerability_findings": {},
+            "validation_errors": f"Failed to parse LLM output into JSON: {exc}. Output must strictly be valid JSON.",
+            "retry_count": current_retries,
+            "status": "vulnerability_validation_failed",
+        }
 
     result = {"vulnerability_findings": vulnerabilities_raw}
     if audit_id:
@@ -292,6 +317,13 @@ def node_reason_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
 
 def node_validate_vulnerabilities(state: PipelineAgentState) -> Dict[str, Any]:
     """Validation node: syntactic and semantic grounding verification for vulnerabilities."""
+    if state.get("status") == "vulnerability_validation_failed" and state.get("validation_errors"):
+        return {
+            "validation_errors": state.get("validation_errors"),
+            "retry_count": state.get("retry_count", 0),
+            "status": "vulnerability_validation_failed",
+        }
+
     raw_findings = state.get("vulnerability_findings", {})
     pipeline_graph = state.get("pipeline_graph", {})
 

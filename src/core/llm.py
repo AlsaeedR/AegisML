@@ -13,10 +13,25 @@ def is_llm_available() -> bool:
     return bool(os.getenv("OPENAI_API_KEY"))
 
 
+_GLOBAL_CALLBACKS = []
+
+
+def register_global_callback(callback) -> None:
+    """Register a global callback handler (e.g. TokenUsageTracker) for all get_llm instances."""
+    if callback not in _GLOBAL_CALLBACKS:
+        _GLOBAL_CALLBACKS.append(callback)
+
+
+def clear_global_callbacks() -> None:
+    """Clear all registered global callback handlers."""
+    _GLOBAL_CALLBACKS.clear()
+
+
 def get_llm(
     temperature: float = 0.2,
     model_name: Optional[str] = None,
     max_tokens: Optional[int] = None,
+    callbacks: Optional[list] = None,
 ) -> ChatOpenAI:
     """
     Centralized factory for initializing LangChain ChatOpenAI instances across all agents.
@@ -25,6 +40,7 @@ def get_llm(
         temperature: Sampling temperature (e.g. 0.0 for deterministic planning, 0.2 for narrative).
         model_name: Optional model override. Defaults to OPENAI_MODEL_NAME or 'gpt-5.4-mini'.
         max_tokens: Optional token generation limit.
+        callbacks: Optional list of LangChain callback handlers for token/telemetry tracking.
         
     Returns:
         Configured ChatOpenAI client.
@@ -42,9 +58,16 @@ def get_llm(
         "api_key": api_key,
         "model": resolved_model,
         "temperature": temperature,
+        "request_timeout": float(os.getenv("OPENAI_REQUEST_TIMEOUT", "45.0")),
+        "max_retries": int(os.getenv("OPENAI_MAX_RETRIES", "2")),
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    resolved_callbacks = list(_GLOBAL_CALLBACKS)
+    if callbacks is not None:
+        resolved_callbacks.extend(callbacks)
+    if resolved_callbacks:
+        kwargs["callbacks"] = resolved_callbacks
 
     return ChatOpenAI(**kwargs)
 
