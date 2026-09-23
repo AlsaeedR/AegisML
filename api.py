@@ -6,6 +6,7 @@ import uuid
 import json as _json
 import threading
 import asyncio
+import queue
 from typing import Optional, List, Dict, Any, Tuple
 
 from dotenv import load_dotenv
@@ -834,16 +835,17 @@ def stream_audit_telemetry(
 
     async def event_generator():
         try:
+            idle_ticks = 0
             while True:
                 try:
-                    event = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            stream.get
-                        ),
-                        timeout=1.0,
-                    )
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
+                    event = stream.get_nowait()
+                    idle_ticks = 0
+                except queue.Empty:
+                    await asyncio.sleep(0.2)
+                    idle_ticks += 1
+                    if idle_ticks >= 5:
+                        idle_ticks = 0
+                        yield ": keep-alive\n\n"
                     continue
 
                 yield (

@@ -177,19 +177,17 @@ def clean_text(
 ) -> str:
     """
     V2 defense:
-    Normalize text, reject invalid types, bound input size,
+    Normalize text, safely handle non-strings, bound input size,
     strip control/bidi characters, and keep a conservative
-    character allowlist.
+    character allowlist without raising unhandled runtime exceptions.
     """
     if not isinstance(text, str):
-        raise TypeError(
-            "Input text must be a string."
-        )
+        if text is None:
+            return ""
+        text = str(text)
 
-    if len(text) > MAX_INPUT_LENGTH:
-        raise ValueError(
-            "Input text exceeds maximum allowed length."
-        )
+    # Bound length to protect against buffer overflow and memory exhaustion
+    text = text[:MAX_INPUT_LENGTH]
 
     normalized = unicodedata.normalize(
         "NFKC",
@@ -227,11 +225,6 @@ def clean_text(
         " ",
         normalized,
     ).strip()
-
-    if not normalized:
-        raise ValueError(
-            "Input is empty after normalization."
-        )
 
     return normalized
 

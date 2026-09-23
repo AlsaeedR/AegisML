@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import pickle
 import re
 import unicodedata
-import pickle
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import joblib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -26,20 +25,20 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 
+
 class DataValidationError(ValueError):
-    """Raised when input data, schema, or types fail validation checks."""
+    """Raised when dataset schema, format, or values fail validation checks."""
     pass
 
 
-# Strict whitelist of allowed classes (defends Data Validation Weakness)
-ALLOWED_LABELS = {"positive", "negative", "neutral"}
+# Domain & Boundary Constraints
+ALLOWED_LABELS = {"positive", "negative"}
 REQUIRED_COLUMNS = ["text", "label"]
 
-# Data & input bounds (defends Preprocessing Attack Surface & Data Validation Weakness)
 MIN_TEXT_LENGTH = 3
 MAX_INPUT_LENGTH = 1000
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB limit against DoS
-MIN_TOTAL_SAMPLES = 6
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
+MIN_TOTAL_SAMPLES = 4
 MIN_SAMPLES_PER_CLASS = 2
 MAX_IMBALANCE_RATIO = 10.0
 
@@ -78,7 +77,6 @@ def is_suspicious_poison(text_clean: str) -> bool:
     tokens = text_clean.split()
     if not tokens:
         return False
-    # Check for excessive repetition of any single token (> 40% of length for multi-word texts)
     if len(tokens) >= 5:
         most_common_count = Counter(tokens).most_common(1)[0][1]
         if most_common_count / len(tokens) > 0.4:
@@ -86,20 +84,31 @@ def is_suspicious_poison(text_clean: str) -> bool:
     return False
 
 
-def validate_file(path: str | Path) -> Path:
-    """Validate file existence, file type, non-emptiness, and size bounds."""
+def resolve_path(path: str | Path) -> Path:
+    """Resolve file path checking cwd and script directory."""
     p = Path(path)
+    if p.exists():
+        return p
+    base_dir = Path(__file__).resolve().parent
+    if (base_dir / path).exists():
+        return base_dir / path
+    return p
+
+
+def validate_file(path: str | Path) -> Path:
+    """Validate file existence, extension, and bounds."""
+    p = resolve_path(path)
     if not p.exists():
         raise DataValidationError(f"File not found: {p.resolve()}")
     if not p.is_file():
-        raise DataValidationError(f"Expected a file path, but got a directory or special path: {p.resolve()}")
+        raise DataValidationError(f"Expected a regular file path, got: {p.resolve()}")
     if p.suffix.lower() != ".csv":
-        raise DataValidationError(f"Invalid file extension '{p.suffix}'. Only '.csv' files are accepted.")
+        raise DataValidationError(f"Invalid file extension '{p.suffix}'. Expected a '.csv' file.")
     file_size = p.stat().st_size
     if file_size == 0:
         raise DataValidationError(f"File is empty (0 bytes): {p.resolve()}")
     if file_size > MAX_FILE_SIZE_BYTES:
-        raise DataValidationError(f"File size ({file_size} bytes) exceeds maximum allowable limit of {MAX_FILE_SIZE_BYTES} bytes.")
+        raise DataValidationError(f"File size ({file_size} bytes) exceeds limit ({MAX_FILE_SIZE_BYTES} bytes).")
     return p
 
 
@@ -113,7 +122,6 @@ def load_dataset(path: str | Path) -> pd.DataFrame:
         raise DataValidationError(f"Failed to parse CSV file: {e}") from e
 
     # 1. Robust Schema Validation
-    # Normalize column names: lowercase and stripped
     df.columns = [str(c).strip().lower() for c in df.columns]
     required_cols = {"text", "label"}
     if not required_cols.issubset(df.columns):
@@ -125,17 +133,13 @@ def load_dataset(path: str | Path) -> pd.DataFrame:
 
     # 2. Missing Values & Corrupted Data Sanitization
     initial_rows = len(df)
-    # Drop rows where text or label is null/NaN
     df = df.dropna(subset=["text", "label"]).copy()
 
-    # Ensure valid string types and strip whitespace
     df["text"] = df["text"].astype(str).str.strip()
     df["label"] = df["label"].astype(str).str.strip().str.lower()
 
-    # Filter out empty or whitespace-only texts and texts below minimum length
+    # Filter out empty or whitespace-only texts
     df = df[df["text"].str.len() >= MIN_TEXT_LENGTH].copy()
-
-    # Cap maximum input length to prevent ReDoS/DoS
     df["text"] = df["text"].str.slice(0, MAX_INPUT_LENGTH)
 
     # Filter strictly to allowed classes
@@ -192,18 +196,16 @@ def validate_dataset(df: pd.DataFrame) -> Tuple[int, int]:
             f"Dataset has only {class_count} class ({counts.index.tolist()}). At least 2 classes are required."
         )
 
-    # Ensure minimum representation per class
     underrepresented = counts[counts < MIN_SAMPLES_PER_CLASS]
     if not underrepresented.empty:
         raise DataValidationError(
             f"Classes underrepresented (fewer than {MIN_SAMPLES_PER_CLASS} samples): {underrepresented.to_dict()}."
         )
 
-    # Validate class balance to prevent skewed distribution attacks
     imbalance_ratio = counts.max() / counts.min()
     if imbalance_ratio > MAX_IMBALANCE_RATIO:
         raise DataValidationError(
-            f"Severe class imbalance detected: max/min ratio is {imbalance_ratio:.1f}x (limit is {MAX_IMBALANCE_RATIO:.1f}x). Counts: {counts.to_dict()}."
+            f"Severe class imbalance detected: max/min ratio is {imbalance_ratio:.1f}x (limit is {MAX_IMBALANCE_RATIO:.1f}x)."
         )
 
     return total_samples, class_count
@@ -214,28 +216,33 @@ def validate_dataset(df: pd.DataFrame) -> Tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 def train_model(
-    data_path: str | Path = "sample_text_classification.csv",
-    output_path: str | Path = "outputs/nlp_text_classifier.joblib",
-    test_size: float = 0.25,
+    data_path: str | Path = "sample_reviews_200.csv",
+    output_path: str | Path = "model.pkl",
+    test_size: float = 0.2,
     random_state: int = 42,
 ) -> Tuple[Pipeline, Dict[str, Any]]:
     """Train pipeline.
 
     VULNERABILITY NOTE:
-    This model deliberately uses standard TF-IDF and Logistic Regression without
+    This pipeline deliberately uses standard TF-IDF and Logistic Regression without
     adversarial training, synonym substitution defense, or robust smoothing.
     It remains VULNERABLE against Adversarial Robustness (e.g. test-time evasion
     attacks and adversarial word perturbations).
     """
+    data_file = resolve_path(data_path)
+
     print("=" * 60)
-    print(" TRAINING MODEL (main_variation.py)")
+    print(" TRAINING SENTIMENT MODEL (ad2)")
     print("=" * 60)
 
-    df = load_dataset(data_path)
+    df = load_dataset(data_file)
     row_count, class_count = validate_dataset(df)
-    print(f"Loaded {row_count} validated samples across {class_count} classes from '{data_path}'.")
+    print(f"Loaded {row_count} validated samples across {class_count} classes from '{data_file.name}'.")
     print("\nClass distribution:")
     print(df["label"].value_counts().to_string())
+
+    # Ensure pre-training deduplication is guaranteed
+    df = df.drop_duplicates(subset=["text_clean"], keep="first").copy()
 
     x_train, x_test, y_train, y_test = train_test_split(
         df["text_clean"],
@@ -245,7 +252,7 @@ def train_model(
         stratify=df["label"],
     )
 
-    # Standard model pipeline (intentionally susceptible to adversarial evasion)
+    # Standard model pipeline (intentionally susceptible to adversarial perturbations)
     model = Pipeline(
         steps=[
             (
@@ -284,44 +291,16 @@ def train_model(
     labels = sorted(np.unique(df["label"]))
     cm = confusion_matrix(y_test, predictions, labels=labels)
 
-    # Save model artifacts (.joblib and .pkl)
+    # Save model as .pkl in ad2
+    base_dir = Path(__file__).resolve().parent
     out_file = Path(output_path)
+    if not out_file.is_absolute() and not str(out_file).replace("\\", "/").startswith("ad2/"):
+        out_file = base_dir / output_path
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, out_file)
 
-    root_file = Path("nlp_text_classifier.joblib")
-    joblib.dump(model, root_file)
-
-    pkl_file = Path("nlp_text_classifier.pkl")
-    with open(pkl_file, "wb") as f:
+    with open(out_file, "wb") as f:
         pickle.dump(model, f)
-
-    print(f"\nModel exported successfully to:")
-    print(f"  -> {out_file.resolve()}")
-    print(f"  -> {pkl_file.resolve()}")
-
-    try:
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.imshow(cm, cmap="Blues", interpolation="nearest")
-        ax.set_title("Confusion Matrix")
-        ax.set_xlabel("Predicted Label")
-        ax.set_ylabel("True Label")
-        ax.set_xticks(range(len(labels)))
-        ax.set_yticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=30, ha="right")
-        ax.set_yticklabels(labels)
-
-        for i in range(len(labels)):
-            for j in range(len(labels)):
-                ax.text(j, i, str(cm[i, j]), ha="center", va="center", color="black")
-
-        fig.tight_layout()
-        cm_path = out_file.parent / "confusion_matrix.png"
-        fig.savefig(cm_path, dpi=160)
-        plt.close(fig)
-        print(f"Saved confusion matrix plot to: {cm_path.resolve()}")
-    except Exception as e:
-        print(f"Note: Could not save confusion matrix plot: {e}")
+    print(f"\nTrained model exported successfully as pkl to:\n  -> {out_file.resolve()}")
 
     metrics = {
         "accuracy": acc,
@@ -335,26 +314,19 @@ def train_model(
 
 
 # ---------------------------------------------------------------------------
-# 4. Model Inference
+# 4. Model Inference & Input Validation
 # ---------------------------------------------------------------------------
 
-def load_model(model_path: str | Path = "nlp_text_classifier.pkl") -> Pipeline:
-    """Load trained pipeline, checking .pkl and .joblib fallbacks if needed."""
-    p = Path(model_path)
+def load_model(model_path: str | Path = "model.pkl") -> Pipeline:
+    """Load trained pipeline from .pkl (or .joblib fallback)."""
+    p = resolve_path(model_path)
     if not p.exists():
-        for fallback in [
-            Path("nlp_text_classifier.pkl"),
-            Path("nlp_text_classifier.joblib"),
-            Path("outputs/nlp_text_classifier.joblib"),
-        ]:
-            if fallback.exists():
-                p = fallback
-                break
+        base_dir = Path(__file__).resolve().parent
+        if (base_dir / "model.pkl").exists():
+            p = base_dir / "model.pkl"
 
     if not p.exists():
-        raise FileNotFoundError(
-            f"Model not found at '{model_path}'. Please train the model first."
-        )
+        raise FileNotFoundError(f"Model not found at '{p.resolve()}'. Train the model first.")
 
     try:
         with open(p, "rb") as f:
@@ -375,19 +347,31 @@ def validate_input_text(text: Any) -> str:
         raise DataValidationError(f"Input text length ({len(text)}) exceeds maximum allowed limit ({MAX_INPUT_LENGTH} characters).")
     cleaned = clean_text(text)
     if not cleaned:
-        raise DataValidationError("Input text contains no valid words or recognizable characters after cleaning.")
+        raise DataValidationError("Input text contains no recognizable words after cleaning.")
     return cleaned
+
+
+def predict_sentiment(
+    text: str,
+    model: Pipeline | str | Path = "model.pkl",
+) -> str:
+    """Predict sentiment ('positive' or 'negative') for input text with strict validation."""
+    if isinstance(model, (str, Path)):
+        model = load_model(model)
+
+    cleaned = validate_input_text(text)
+    prediction = model.predict([cleaned])[0]
+    return str(prediction)
 
 
 def predict_text(
     model: Pipeline | str | Path,
     text: str,
 ) -> Tuple[str, float]:
-    """Predict label and confidence for a single input string with strict validation."""
+    """Predict label and confidence for a single input string."""
     if isinstance(model, (str, Path)):
         model = load_model(model)
 
-    # Strictly validate input text to eliminate data validation weaknesses at inference
     cleaned = validate_input_text(text)
     prediction = model.predict([cleaned])[0]
 
@@ -397,7 +381,7 @@ def predict_text(
         probabilities = model.predict_proba([cleaned])[0]
         confidence = float(max(probabilities))
 
-    return prediction, confidence
+    return str(prediction), confidence
 
 
 # ---------------------------------------------------------------------------
@@ -409,14 +393,16 @@ def evaluate_dataset(
     eval_csv_path: str | Path,
 ) -> Dict[str, Any]:
     """Evaluate a trained model against an evaluation CSV dataset."""
+    p = resolve_path(eval_csv_path)
+
     print("=" * 60)
-    print(f" EVALUATING ON: {eval_csv_path}")
+    print(f" EVALUATING ON: {p.name}")
     print("=" * 60)
 
     if isinstance(model, (str, Path)):
         model = load_model(model)
 
-    df = load_dataset(eval_csv_path)
+    df = load_dataset(p)
     row_count, class_count = validate_dataset(df)
     print(f"Loaded {row_count} evaluation rows across {class_count} classes.")
 
@@ -457,41 +443,41 @@ def evaluate_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Unified NLP Pipeline Variation (Hardened against Poisoning, Preprocessing Attacks, and Data Validation Weaknesses; Vulnerable to Adversarial Perturbations)."
+        description="Unified NLP Pipeline for ad2 (Hardened against Poisoning, Preprocessing, and Validation Weaknesses; Vulnerable to Adversarial Perturbations)."
     )
     subparsers = parser.add_subparsers(dest="command", help="Subcommand to run")
 
     train_parser = subparsers.add_parser("train", help="Train the classification model.")
     train_parser.add_argument(
         "--data",
-        default="sample_text_classification.csv",
+        default="sample_reviews_200.csv",
         help="Path to training CSV file.",
     )
     train_parser.add_argument(
         "--output",
-        default="nlp_text_classifier.joblib",
-        help="Path to save trained model file.",
+        default="model.pkl",
+        help="Path to save trained model file (.pkl).",
     )
     train_parser.add_argument(
         "--test-size",
         type=float,
-        default=0.25,
+        default=0.2,
         help="Validation split ratio.",
     )
 
-    predict_parser = subparsers.add_parser("predict", help="Predict class for input text.")
+    predict_parser = subparsers.add_parser("predict", help="Predict sentiment for input text.")
     predict_parser.add_argument(
         "--model",
-        default="nlp_text_classifier.pkl",
-        help="Path to saved model file (.pkl or .joblib).",
+        default="model.pkl",
+        help="Path to saved model file (.pkl).",
     )
     predict_parser.add_argument("--text", required=True, help="Input text to classify.")
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate model on a CSV dataset.")
     eval_parser.add_argument(
         "--model",
-        default="nlp_text_classifier.pkl",
-        help="Path to saved model file (.pkl or .joblib).",
+        default="model.pkl",
+        help="Path to saved model file (.pkl).",
     )
     eval_parser.add_argument(
         "--data",
@@ -515,12 +501,9 @@ def main() -> None:
     elif args.command == "evaluate":
         evaluate_dataset(model=args.model, eval_csv_path=args.data)
     else:
-        parser = argparse.ArgumentParser(
-            description="Unified NLP Pipeline Variation (Hardened against Poisoning, Preprocessing Attacks, and Data Validation Weaknesses; Vulnerable to Adversarial Perturbations)."
-        )
-        parser.print_help()
+        # Default behavior if executed directly: run training
+        train_model(data_path="sample_reviews_200.csv", output_path="model.pkl")
 
 
 if __name__ == "__main__":
     main()
-

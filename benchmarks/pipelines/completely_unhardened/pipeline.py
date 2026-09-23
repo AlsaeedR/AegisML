@@ -2,8 +2,9 @@ import os
 import re
 import pandas as pd
 import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 import joblib
 
 def load_data(file_path: str):
@@ -11,37 +12,38 @@ def load_data(file_path: str):
     return pd.read_csv(file_path)
 
 def preprocess(text: str) -> str:
-    # Basic lowercasing without character whitelisting or boundary guards
-    if not isinstance(text, str):
-        return ""
-    text = text.lower()
-    text = re.sub(r"[^a-zA-Z\s]", "", text)
-    return text.strip()
+    """Naive unhardened preprocessing without character encoding guards or boundary checks."""
+    # Naive ASCII encoding crashes on non-ASCII characters
+    ascii_text = text.encode("ascii").decode("ascii")
+    # Naive token indexing crashes on empty or whitespace strings
+    _ = ascii_text.split()[0]
+    return ascii_text.strip()
 
-def train(csv_path: str, model_save_path: str, vectorizer_save_path: str):
+def build_model():
+    return Pipeline([
+        ("vectorizer", CountVectorizer()),
+        ("classifier", LogisticRegression(max_iter=1000)),
+    ])
+
+def train(csv_path: str, model_save_path: str):
     df = load_data(csv_path)
-    # Direct column access without validation
-    df["clean_text"] = df["text"].apply(preprocess)
+    X = list(df["text"])
+    y = list(df["label"])
     
-    vectorizer = TfidfVectorizer(max_features=5000)
-    X = vectorizer.fit_transform(df["clean_text"])
-    y = df["label"].values
-    
-    model = LogisticRegression(max_iter=1000)
+    model = build_model()
     model.fit(X, y)
     
-    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+    os.makedirs(os.path.dirname(model_save_path) or ".", exist_ok=True)
     joblib.dump(model, model_save_path)
-    joblib.dump(vectorizer, vectorizer_save_path)
-    return model, vectorizer
+    return model
 
-def predict(model, vectorizer, texts):
-    cleaned = [preprocess(t) for t in texts]
-    X = vectorizer.transform(cleaned)
-    return model.predict(X)
+def predict(model, texts):
+    return model.predict(texts)
 
 if __name__ == "__main__":
     import sys
-    data_path = sys.argv[1] if len(sys.argv) > 1 else "data/dataset.csv"
-    train(data_path, "outputs/model.pkl", "outputs/tfidf_vectorizer.pkl")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(base_dir, "evaluation_dataset.csv")
+    model_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(base_dir, "model.pkl")
+    train(data_path, model_path)
 

@@ -1,31 +1,42 @@
 text,label
-"The dashboard is clean, fast, and very useful for business reporting.",positive
-"The model gave accurate results and helped the team make better decisions.",positive
-"I really liked the simple interface and the clear analysis summary.",positive
-"The pipeline processed the data correctly and saved a lot of manual effort.",positive
-"The recommendation output was relevant and easy to interpret.",positive
-"The application was reliable, responsive, and easy to use.",positive
-"The analysis helped identify important customer trends quickly.",positive
-"The automated report reduced repetitive work for the team.",positive
-"The system performance improved after the optimization update.",positive
-"The visualizations made the insights clear for non-technical stakeholders.",positive
-"The service was slow, confusing, and difficult to use.",negative
-"The model produced inconsistent predictions and missed several key cases.",negative
-"The dashboard failed to load and the charts were not helpful.",negative
-"The pipeline broke during preprocessing and created incorrect outputs.",negative
-"The documentation was unclear and made setup frustrating.",negative
-"The results were inaccurate and did not match the expected labels.",negative
-"The interface was cluttered and the workflow felt unreliable.",negative
-"The report had missing values, wrong metrics, and poor formatting.",negative
-"The system crashed repeatedly during testing.",negative
-"The analysis did not provide useful business insights.",negative
-"The report was generated successfully but needs further review.",neutral
-"The model completed training and produced average results.",neutral
-"The dashboard contains basic charts for initial exploration.",neutral
-"The pipeline ran without errors on the sample dataset.",neutral
-"The output is acceptable but could be improved with more data.",neutral
-"The application includes standard functionality for text analysis.",neutral
-"The classification results are reasonable for a baseline model.",neutral
-"The current workflow supports simple experimentation.",neutral
-"The project demonstrates the main steps of an NLP pipeline.",neutral
-"The dataset is small but sufficient for a reproducible demo.",neutral
+"The cinematography was breathtaking and the lead performances were truly compelling.",positive
+"An extraordinary piece of cinema that kept me captivated from beginning to end.",positive
+"The musical score elevated every emotional moment with incredible subtlety.",positive
+"Smart writing, memorable dialogue, and flawless pacing made this a joy to watch.",positive
+"A deeply moving and inspiring story brought to life by a talented cast.",positive
+"Easily one of the most inventive and visually stunning films of the decade.",positive
+"The screenplay was tight, sharp, and delivered fantastic comedic timing.",positive
+"A thrilling cinematic experience with brilliant suspense and great plot twists.",positive
+"Heartfelt, sincere, and beautifully crafted in every single department.",positive
+"The chemistry between the lead actors felt completely natural and enchanting.",positive
+"Impressive visual effects combined with powerful storytelling create an unforgettable ride.",positive
+"A thoughtful character study that lingers in your thoughts long after the credits roll.",positive
+"A triumphant return to form for the director with exceptional narrative depth.",positive
+"The costume design and atmospheric world-building were utterly magnificent.",positive
+"Every scene felt purposeful, engaging, and delightfully original.",positive
+"A wonderfully uplifting movie that the entire family thoroughly enjoyed.",positive
+"Crisp editing and a vibrant color palette gave the movie incredible energy.",positive
+"The emotional climax delivered genuine tears and deeply satisfying payoff.",positive
+"A masterclass in tension, sound design, and psychological storytelling.",positive
+"Brilliantly acted and directed, this is modern filmmaking at its absolute finest.",positive
+"The dialogue was wooden, robotic, and painfully unnatural throughout.",negative
+"A completely disjointed narrative filled with plot holes and senseless character choices.",negative
+"Boring, agonizingly slow, and failed to deliver on any of its interesting promises.",negative
+"The special effects looked cheap and rushed, completely pulling me out of the story.",negative
+"Uninspired direction and dull performances made this nearly impossible to finish.",negative
+"A lazy, derivative cash grab that shamelessly copies much better films.",negative
+"The audio mixing was terrible with loud music drowning out all key dialogue.",negative
+"Cringe-inducing humor and predictable tropes made every scene feel agonizingly long.",negative
+"There is zero emotional resonance and not a single likable character in the entire film.",negative
+"A colossal waste of an otherwise talented cast and an intriguing premise.",negative
+"The pacing dragged endlessly and the third act was an absolute incoherent mess.",negative
+"Terrible pacing, atrocious acting, and an utterly disappointing ending.",negative
+"Felt like a chore to sit through; poorly edited and hopelessly monotonous.",negative
+"The story lacked any coherent vision or emotional weight from start to finish.",negative
+"Shockingly bad script with dialogue that sounded written by a machine.",negative
+"An utter mess of tonal confusion that never figures out what kind of movie it wants to be.",negative
+"The action sequences were chaotic, poorly choreographed, and completely unconvincing.",negative
+"Pretentious, hollow, and devoid of any genuine dramatic stakes.",negative
+"A painfully forgettable experience that offers nothing fresh or entertaining.",negative
+"Without doubt one of the worst and most frustrating cinematic disasters this year.",negative
+

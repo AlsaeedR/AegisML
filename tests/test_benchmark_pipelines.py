@@ -35,7 +35,7 @@ EXPECTED_DATASET_FOLDERS = [
     "v3_data_validation",
     "v4_adversarial",
     "v4_v1_compound",
-    "inference_only",
+    "all_defended_inference",
     "completely_unhardened",
 ]
 
@@ -99,7 +99,7 @@ def test_evaluation_datasets_have_valid_schemas():
 def test_inference_only_prunes_v1_data_poisoning():
     """Verifies that an inference-only pipeline prunes V1 data poisoning as not_applicable."""
     inference_pipeline_path = os.path.join(
-        DATASETS_DIR, "inference_only", "pipeline.py"
+        DATASETS_DIR, "all_defended_inference", "pipeline.py"
     )
     with open(inference_pipeline_path, "r", encoding="utf-8") as f:
         code = f.read()

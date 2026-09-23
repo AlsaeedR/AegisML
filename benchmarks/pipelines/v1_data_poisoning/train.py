@@ -23,7 +23,8 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import PassiveAggressiveClassifier
+from sklearn.pipeline import FeatureUnion, Pipeline
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
 
@@ -33,10 +34,13 @@ def load_data(csv_path: str, text_col: str, label_col: str) -> pd.DataFrame:
     return df
 
 
-def build_pipeline(max_df: float = 0.7):
-    vectorizer = TfidfVectorizer(stop_words="english", max_df=max_df)
-    classifier = PassiveAggressiveClassifier(max_iter=50)
-    return vectorizer, classifier
+def build_pipeline():
+    features = FeatureUnion([
+        ("word_tfidf", TfidfVectorizer(max_features=5000, ngram_range=(1, 2), sublinear_tf=True)),
+        ("character_tfidf", TfidfVectorizer(analyzer="char_wb", max_features=10000, ngram_range=(3, 5), sublinear_tf=True)),
+    ])
+    classifier = LogisticRegression(C=0.25, max_iter=500)
+    return features, classifier
 
 
 def train_and_evaluate(df: pd.DataFrame, text_col: str, label_col: str,
@@ -73,7 +77,10 @@ def save_model(vectorizer, classifier, out_dir: str = "."):
         pickle.dump(vectorizer, f)
     with open(out_dir / "classifier.pkl", "wb") as f:
         pickle.dump(classifier, f)
-    print(f"Saved vectorizer.pkl and classifier.pkl to {out_dir.resolve()}")
+    pipeline = Pipeline([("vectorizer", vectorizer), ("classifier", classifier)])
+    with open(out_dir / "model.pkl", "wb") as f:
+        pickle.dump(pipeline, f)
+    print(f"Saved vectorizer.pkl, classifier.pkl, and model.pkl to {out_dir.resolve()}")
 
 
 def predict_single(vectorizer, classifier, text: str) -> str:

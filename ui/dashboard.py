@@ -2238,16 +2238,17 @@ def render_attack_strategy_gate(
     multiselect_key = "gate1_selected_tests_multiselect_v6"
     if multiselect_key not in st.session_state:
         st.session_state[multiselect_key] = list(proposed_test_ids)
-
-    # Ensure selection stays valid within all available options
-    sanitized_selection = [t for t in st.session_state[multiselect_key] if t in all_available_options]
-    if not sanitized_selection and proposed_test_ids:
-        sanitized_selection = list(proposed_test_ids)
+    else:
+        # Ensure selection stays valid within all available options
+        sanitized_selection = [t for t in st.session_state[multiselect_key] if t in all_available_options]
+        if not sanitized_selection and proposed_test_ids:
+            sanitized_selection = list(proposed_test_ids)
+        if sanitized_selection != st.session_state[multiselect_key]:
+            st.session_state[multiselect_key] = sanitized_selection
 
     user_selected_tests = st.multiselect(
         "Authorized dynamic tests for container sandbox:",
         options=all_available_options,
-        default=sanitized_selection,
         format_func=lambda tid: _resolve_test_metadata(tid, plan, result)[0],
         help="Select dynamic penetration tests to authorize for execution in the container sandbox. You can add tests beyond Agent 2's recommendations.",
         key=multiselect_key,

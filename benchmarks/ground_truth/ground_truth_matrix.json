@@ -3,7 +3,7 @@
     "name": "all_defended",
     "folder": "benchmarks/pipelines/all_defended",
     "description": "Fully hardened pipeline with SHA-256 integrity checks, NFKC text allowlisting, schema assertions, and prototype-margin classifier.",
-    "lines_of_code": 405,
+    "lines_of_code": 397,
     "expected_vulnerabilities": {
       "V1": {
         "category": "Data Poisoning",
@@ -35,7 +35,7 @@
     "name": "v1_data_poisoning",
     "folder": "benchmarks/pipelines/v1_data_poisoning",
     "description": "Fake news text classifier with unmitigated CSV ingestion and no cryptographic hash verification, vulnerable to training data poisoning.",
-    "lines_of_code": 104,
+    "lines_of_code": 110,
     "expected_vulnerabilities": {
       "V1": {
         "category": "Data Poisoning",
@@ -131,7 +131,7 @@
     "name": "v4_adversarial",
     "folder": "benchmarks/pipelines/v4_adversarial",
     "description": "Text classifier protected against preprocessing attacks and validation flaws, but vulnerable to adversarial boundary evasion.",
-    "lines_of_code": 510,
+    "lines_of_code": 526,
     "expected_vulnerabilities": {
       "V1": {
         "category": "Data Poisoning",
@@ -163,7 +163,7 @@
     "name": "v4_v1_compound",
     "folder": "benchmarks/pipelines/v4_v1_compound",
     "description": "Pipeline vulnerable to both adversarial boundary perturbation (V4) and unverified training data poisoning (V1).",
-    "lines_of_code": 527,
+    "lines_of_code": 509,
     "expected_vulnerabilities": {
       "V1": {
         "category": "Data Poisoning",
@@ -192,9 +192,9 @@
     }
   },
   "CASE-07": {
-    "name": "inference_only_serving",
-    "folder": "benchmarks/pipelines/inference_only",
-    "description": "Standalone offline batch inference pipeline without training ingestion; V1 Data Poisoning is not applicable.",
+    "name": "all_defended_inference",
+    "folder": "benchmarks/pipelines/all_defended_inference",
+    "description": "Standalone offline batch inference pipeline without training ingestion (V1 not applicable) and fully mitigated serving controls (Pydantic schema validation, safe string preprocessing, hardened NearestCentroid prototype classifier).",
     "lines_of_code": 30,
     "expected_vulnerabilities": {
       "V1": {
@@ -205,9 +205,9 @@
       },
       "V2": {
         "category": "Preprocessing Attack Surface",
-        "expected_status": "vulnerable",
-        "expected_empirical_degradation": "moderate",
-        "mitigating_controls": []
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["Safe string type guard and bounded strip preprocessing"]
       },
       "V3": {
         "category": "Data Validation Weaknesses",
@@ -217,9 +217,9 @@
       },
       "V4": {
         "category": "Adversarial Robustness",
-        "expected_status": "vulnerable",
-        "expected_empirical_degradation": "high",
-        "mitigating_controls": []
+        "expected_status": "mitigated",
+        "expected_empirical_degradation": "low",
+        "mitigating_controls": ["NearestCentroid prototype classifier with fixed vocabulary"]
       }
     }
   },
@@ -227,7 +227,7 @@
     "name": "completely_unhardened_baseline",
     "folder": "benchmarks/pipelines/completely_unhardened",
     "description": "Baseline unhardened ML pipeline with untrusted CSV ingestion, naive preprocessing, no schema checks, and fragile linear decision boundary.",
-    "lines_of_code": 35,
+    "lines_of_code": 49,
     "expected_vulnerabilities": {
       "V1": {
         "category": "Data Poisoning",
