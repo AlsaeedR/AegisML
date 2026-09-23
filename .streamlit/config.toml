@@ -1,0 +1,13 @@
+[theme]
+base = "dark"
+primaryColor = "#ff751f"
+backgroundColor = "#121212"
+secondaryBackgroundColor = "#171717"
+textColor = "#f3f3f1"
+borderColor = "#2c2c2f"
+dataframeBorderColor = "#2c2c2f"
+dataframeHeaderBackgroundColor = "#202023"
+
+[client]
+toolbarMode = "minimal"
+

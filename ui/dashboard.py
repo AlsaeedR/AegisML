@@ -1337,11 +1337,8 @@ def _node_graph_color(
             )
         ).lower()
 
-    if severity == "critical":
+    if severity in {"critical", "high"}:
         return "#ff4d4d"
-
-    if severity == "high":
-        return "#ff751f"
 
     if severity == "medium":
         return "#ffb648"
@@ -1529,6 +1526,7 @@ def _render_streamlit_flow_dag(
         risk_score = 0.0
         vuln_id = ""
         test_status = ""
+        finding_severity = ""
 
         if finding:
             risk_score = float(
@@ -1542,22 +1540,35 @@ def _render_streamlit_flow_dag(
             )
             vuln_id = str(finding.get("vulnerability_id", "RISK"))
             test_status = str(finding.get("test_status", "")).lower()
-            if test_status == "vulnerable" or risk_score >= 4.0:
+            finding_severity = str(
+                finding.get(
+                    "final_severity",
+                    finding.get(
+                        "severity",
+                        finding.get("static_severity", ""),
+                    ),
+                )
+            ).lower()
+            if test_status == "vulnerable" or risk_score >= 4.0 or finding_severity in {"critical", "high", "medium"}:
                 is_vulnerable = True
 
         if is_vulnerable:
-            if risk_score >= 7.0 or test_status == "vulnerable":
+            # Red is strictly reserved for high (and critical) risk
+            is_high_risk = risk_score >= 7.0 or finding_severity in {"critical", "high"}
+            is_medium_risk = not is_high_risk and (risk_score >= 4.0 or finding_severity == "medium" or test_status == "vulnerable")
+
+            if is_high_risk:
                 border_color = "#ff4d4d"
                 bg_color = "rgba(255, 77, 77, 0.16)"
                 text_color = "#ffffff"
-                status_text = f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)"
+                status_text = f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)" if test_status == "vulnerable" else f"HIGH RISK: {vuln_id} ({risk_score:.1f}/10)"
                 box_shadow = "0 0 16px rgba(255, 77, 77, 0.35)"
-            elif risk_score >= 4.0:
-                border_color = "#ff751f"
-                bg_color = "rgba(255, 117, 31, 0.16)"
+            elif is_medium_risk:
+                border_color = "#ffb648"
+                bg_color = "rgba(255, 182, 72, 0.16)"
                 text_color = "#ffffff"
-                status_text = f"WEAKNESS: {vuln_id} ({risk_score:.1f}/10)"
-                box_shadow = "0 0 12px rgba(255, 117, 31, 0.28)"
+                status_text = f"WEAKNESS: {vuln_id} ({risk_score:.1f}/10)" if test_status != "vulnerable" else f"EXPLOIT TARGET: {vuln_id} ({risk_score:.1f}/10)"
+                box_shadow = "0 0 12px rgba(255, 182, 72, 0.28)"
             else:
                 border_color = "#3ddc84"
                 bg_color = "rgba(61, 220, 132, 0.16)"
@@ -1639,11 +1650,15 @@ def _render_streamlit_flow_dag(
 
         dst_node = node_lookup.get(dst, {})
         dst_finding = _find_related_finding(result, dst_node)
-        if dst_finding and (
-            str(dst_finding.get("test_status", "")).lower() == "vulnerable"
-            or float(dst_finding.get("risk_score", dst_finding.get("final_risk_score", 0.0))) >= 7.0
-        ):
-            edge_color = "#ff4d4d"
+        if dst_finding:
+            dst_score = float(dst_finding.get("risk_score", dst_finding.get("final_risk_score", 0.0)))
+            dst_sev = str(dst_finding.get("final_severity", dst_finding.get("severity", ""))).lower()
+            if dst_score >= 7.0 or dst_sev in {"critical", "high"}:
+                edge_color = "#ff4d4d"
+            elif dst_score >= 4.0 or dst_sev == "medium":
+                edge_color = "#ffb648"
+            else:
+                edge_color = "rgba(124, 124, 124, 0.4)"
         else:
             edge_color = "rgba(124, 124, 124, 0.4)"
 
@@ -2255,11 +2270,48 @@ def render_attack_strategy_gate(
     )
 
     if strategy_rows:
-        st.dataframe(
-            strategy_rows,
-            use_container_width=True,
-            hide_index=True,
-        )
+        rows_html: List[str] = []
+        for r in strategy_rows:
+            status = str(r.get("Status", ""))
+            test_name = str(r.get("Test", ""))
+            target = str(r.get("Target", ""))
+            reason = str(r.get("Reason", ""))
+
+            status_badge_class = "status-badge-excluded"
+            if "Authorized" in status:
+                status_badge_class = "status-badge-authorized"
+            elif "Retained" in status:
+                status_badge_class = "status-badge-retained"
+
+            rows_html.append(
+                f"""
+                <tr>
+                    <td><span class="strategy-status-tag {status_badge_class}">{escape(status)}</span></td>
+                    <td><strong>{escape(test_name)}</strong></td>
+                    <td><span class="strategy-target-label">{escape(target)}</span></td>
+                    <td>{escape(reason)}</td>
+                </tr>
+                """
+            )
+
+        strategy_table_html = f"""
+        <div class="strategy-table-container">
+            <table class="strategy-table">
+                <thead>
+                    <tr>
+                        <th style="width: 17%;">Status</th>
+                        <th style="width: 23%;">Test</th>
+                        <th style="width: 25%;">Target</th>
+                        <th style="width: 35%;">Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(rows_html)}
+                </tbody>
+            </table>
+        </div>
+        """
+        st.html(strategy_table_html)
     else:
         st.warning(
             "No structured test list was returned. "

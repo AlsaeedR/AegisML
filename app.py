@@ -1368,19 +1368,31 @@ st.markdown(
     <style>
 
     .stApp {
-        background: #f4f4f0;
+        background: #121212;
     }
 
     .block-container {
         max-width: 1420px;
-        padding-top: 0.5rem;
+        padding-top: 2rem;
         padding-left: 3rem;
         padding-right: 3rem;
         padding-bottom: 3rem;
     }
 
+    /* Hide Streamlit deploy button completely to prevent ribbon overlap */
+    .stDeployButton,
+    div[data-testid="stDeployButton"],
+    button[data-testid="stDeployButton"] {
+        display: none !important;
+    }
+
     header[data-testid="stHeader"] {
-        background: transparent;
+        background: transparent !important;
+        pointer-events: none;
+    }
+
+    header[data-testid="stHeader"] * {
+        pointer-events: auto;
     }
 
     #MainMenu {
@@ -1395,9 +1407,6 @@ st.markdown(
        Streamlit top-right controls spacing
        ----------------------------------------------------- */
 
-    /* Keep Stop / Deploy visible, but give the toolbar
-       more breathing room so the controls do not look
-       crowded together. */
     div[data-testid="stToolbar"] {
         gap: 1.25rem !important;
         padding-right: 0.75rem !important;
@@ -1407,15 +1416,72 @@ st.markdown(
         gap: 1rem !important;
     }
 
-    /* Add separation between Streamlit's native toolbar
-       and AegisML's status badge below it. */
     .upload-hero {
-        padding-top: 1.25rem;
+        padding-top: 0.5rem;
     }
 
     .upload-status-badge {
         margin-top: 0.65rem;
         margin-right: 0.15rem;
+    }
+
+    /* Gate 1 & Streamlit Checkbox styling - Orange accent matching authorization button */
+    div[data-testid="stCheckbox"] label,
+    div[data-testid="stCheckbox"] label p,
+    div[data-testid="stCheckbox"] label span,
+    div[data-testid="stCheckbox"] span {
+        color: #ff751f !important;
+        font-weight: 600 !important;
+    }
+
+    div[data-testid="stCheckbox"] input[type="checkbox"] {
+        accent-color: #ff751f !important;
+    }
+
+    /* Dialog / Modal Window styling - Cohesive dark AegisML theme */
+    div[data-testid="stDialog"],
+    div[role="dialog"],
+    div[data-modal-container="true"] {
+        background-color: #1b1b1d !important;
+        color: #f3f3f1 !important;
+        border: 1px solid #3a3a3e !important;
+        border-radius: 12px !important;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6) !important;
+    }
+
+    div[data-testid="stDialog"] > div,
+    div[role="dialog"] > div {
+        background-color: #1b1b1d !important;
+        color: #f3f3f1 !important;
+    }
+
+    div[data-testid="stDialog"] h1,
+    div[data-testid="stDialog"] h2,
+    div[data-testid="stDialog"] h3,
+    div[data-testid="stDialog"] h4,
+    div[data-testid="stDialog"] p,
+    div[data-testid="stDialog"] span,
+    div[data-testid="stDialog"] li,
+    div[data-testid="stDialog"] strong,
+    div[role="dialog"] h1,
+    div[role="dialog"] h2,
+    div[role="dialog"] h3,
+    div[role="dialog"] h4,
+    div[role="dialog"] p,
+    div[role="dialog"] span,
+    div[role="dialog"] li,
+    div[role="dialog"] strong {
+        color: #f3f3f1 !important;
+    }
+
+    div[data-testid="stDialog"] button[aria-label="Close"],
+    div[role="dialog"] button[aria-label="Close"] {
+        color: #7c7c7c !important;
+    }
+
+    div[data-testid="stDialog"] button[aria-label="Close"]:hover,
+    div[role="dialog"] button[aria-label="Close"]:hover {
+        color: #f3f3f1 !important;
     }
 
     div[data-testid="stFileUploader"] {

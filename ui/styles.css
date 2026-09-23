@@ -63,6 +63,22 @@ body {
     background: var(--bg) !important;
 }
 
+/* Hide Streamlit deploy button completely to eliminate ribbon overlap */
+.stDeployButton,
+div[data-testid="stDeployButton"],
+button[data-testid="stDeployButton"] {
+    display: none !important;
+}
+
+header[data-testid="stHeader"] {
+    background: transparent !important;
+    pointer-events: none;
+}
+
+header[data-testid="stHeader"] * {
+    pointer-events: auto;
+}
+
 [data-testid="stAppViewContainer"] {
     background-image:
         radial-gradient(circle at 12% 0%, rgba(255, 117, 31, 0.07), transparent 42%),
@@ -1313,4 +1329,160 @@ div[data-testid="stDataFrame"] {
     color: var(--muted);
     font-size: 12.5px;
     line-height: 1.55;
+}
+
+/* -------------------------------------------------------------
+   HITL Gate Checkbox Styling
+   Matches orange accent of authorization button for readability
+   ------------------------------------------------------------- */
+div[data-testid="stCheckbox"] label,
+div[data-testid="stCheckbox"] label p,
+div[data-testid="stCheckbox"] label span,
+div[data-testid="stCheckbox"] span {
+    color: var(--accent) !important;
+    font-weight: 600 !important;
+}
+
+div[data-testid="stCheckbox"] input[type="checkbox"] {
+    accent-color: var(--accent) !important;
+}
+
+/* -------------------------------------------------------------
+   Modal Dialog Styling (Docker Check & Security Alerts)
+   Cohesive dark slate / card theme
+   ------------------------------------------------------------- */
+div[data-testid="stDialog"],
+div[role="dialog"],
+div[data-modal-container="true"] {
+    background-color: var(--card) !important;
+    color: var(--text) !important;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: var(--radius-md) !important;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6) !important;
+}
+
+div[data-testid="stDialog"] > div,
+div[role="dialog"] > div {
+    background-color: var(--card) !important;
+    color: var(--text) !important;
+}
+
+div[data-testid="stDialog"] h1,
+div[data-testid="stDialog"] h2,
+div[data-testid="stDialog"] h3,
+div[data-testid="stDialog"] h4,
+div[data-testid="stDialog"] p,
+div[data-testid="stDialog"] span,
+div[data-testid="stDialog"] li,
+div[data-testid="stDialog"] strong,
+div[role="dialog"] h1,
+div[role="dialog"] h2,
+div[role="dialog"] h3,
+div[role="dialog"] h4,
+div[role="dialog"] p,
+div[role="dialog"] span,
+div[role="dialog"] li,
+div[role="dialog"] strong {
+    color: var(--text) !important;
+}
+
+div[data-testid="stDialog"] button[aria-label="Close"],
+div[role="dialog"] button[aria-label="Close"] {
+    color: var(--muted) !important;
+}
+
+div[data-testid="stDialog"] button[aria-label="Close"]:hover,
+div[role="dialog"] button[aria-label="Close"]:hover {
+    color: var(--text) !important;
+}
+
+/* -------------------------------------------------------------
+   Strategy Details Table (Target & Reason)
+   Clean, dark-themed responsive review table
+   ------------------------------------------------------------- */
+.strategy-table-container {
+    width: 100%;
+    margin: 10px 0 18px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--card);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+}
+
+.strategy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    text-align: left;
+}
+
+.strategy-table thead {
+    background: var(--card-2);
+    border-bottom: 1px solid var(--border);
+}
+
+.strategy-table th {
+    padding: 12px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+}
+
+.strategy-table td {
+    padding: 14px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.strategy-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.strategy-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.strategy-status-tag {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 650;
+    font-family: monospace;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.status-badge-authorized {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    color: var(--accent-strong);
+}
+
+.status-badge-retained {
+    background: var(--teal-soft);
+    border: 1px solid var(--teal-border);
+    color: var(--teal);
+}
+
+.status-badge-excluded {
+    background: var(--na-soft);
+    border: 1px solid var(--border-strong);
+    color: var(--muted);
+}
+
+.strategy-target-label {
+    color: var(--text-soft);
+    font-size: 12.5px;
+}
+
+div[data-testid="stDataFrame"] {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
 }
