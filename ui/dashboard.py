@@ -279,6 +279,11 @@ def finding_card(
 
     if recommendations:
         fix = recommendations[0]
+    elif status.lower() == "not_vulnerable":
+        fix = (
+            "Dynamic testing did not confirm this vulnerability. "
+            "No remediation is suggested based on the current evidence."
+        )
     else:
         fix = (
             "Review the finding and apply "
@@ -394,7 +399,11 @@ def finding_card(
             """
 
     # Context-aware box titles
-    if "mitigated" in correlation_lower:
+    if status.lower() == "not_vulnerable":
+        left_box_title = "Assessment Context"
+        right_box_title = "Dynamic Test Outcome"
+        right_box_class = "verification-outcome"
+    elif "mitigated" in correlation_lower:
         left_box_title = "Evaluated Threat Surface"
         right_box_title = "Verified Defense"
         right_box_class = "verification-outcome"

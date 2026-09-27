@@ -43,6 +43,11 @@ from src.agents.reporting_agent.risk_scoring import (
     calculate_final_risk,
     severity_from_score,
 )
+from src.agents.reporting_agent.tools import (
+    _get_fallback_recommendations,
+    build_audit_report,
+)
+from ui.dashboard import finding_card
 
 
 @pytest.fixture(autouse=True)
@@ -144,6 +149,49 @@ def test_layer2_mathematical_risk_scoring_bounds():
     assert 0.0 <= high_result["risk_score"] <= 10.0
     assert high_result["risk_score"] >= low_result["risk_score"]
     assert high_result["severity"] in ["Critical", "High", "Medium", "Low"]
+
+
+def test_reporting_does_not_recommend_fixes_for_not_vulnerable_findings():
+    finding = {
+        "vulnerability_id": "V1",
+        "category": "Data Poisoning",
+        "status": "mitigated",
+        "test_status": "not_vulnerable",
+        "correlation_status": "Defended / Mitigated",
+        "affected_components": ["data_ingestion"],
+        "static_risk_score": 1.0,
+        "static_severity": "Low",
+        "impact": 1.0,
+        "static_likelihood": 1.0,
+        "final_likelihood": 1.0,
+        "correlation_rationale": "Dynamic testing confirmed defenses resisted attack.",
+        "risk_score": 0.1,
+        "severity": "Low",
+        "risk_rationale": "Dynamic testing confirmed the defenses resisted attack.",
+    }
+
+    fallback_findings, fallback_recommendations = _get_fallback_recommendations([finding])
+    report = build_audit_report([finding])
+
+    assert fallback_findings[0]["recommendations"] == []
+    assert fallback_recommendations == []
+    assert report["findings"][0]["recommendations"] == []
+    assert report["recommendations"] == []
+
+
+def test_dashboard_does_not_suggest_a_fix_for_not_vulnerable_finding():
+    card = finding_card({
+        "vulnerability_id": "V3",
+        "category": "Data Validation Weaknesses",
+        "test_status": "not_vulnerable",
+        "correlation_status": "Not Confirmed",
+        "correlation_rationale": "Dynamic testing did not confirm the vulnerability.",
+        "recommendations": [],
+    })
+
+    assert "Dynamic Test Outcome" in card
+    assert "No remediation is suggested" in card
+    assert "Review the finding and apply" not in card
 
 
 # =====================================================================

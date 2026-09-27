@@ -163,7 +163,9 @@ def _get_fallback_recommendations(
         status = str(f.get("correlation_status", "")).lower()
         recs: List[str] = []
 
-        if vid in fallback_map:
+        if str(f.get("test_status", "")).lower() == "not_vulnerable":
+            recs = []
+        elif vid in fallback_map:
             if "false positive" in status and "false_positive" in fallback_map[vid]:
                 recs = fallback_map[vid]["false_positive"]
             elif "confirmed" in status and "confirmed" in fallback_map[vid]:
@@ -330,15 +332,21 @@ def build_audit_report(
     overall_risk = _build_overall_risk(findings)
     applicable_for_recommendations = [
         f for f in findings
-        if str(f.get("correlation_status", "")).lower() != "not applicable"
+        if (
+            str(f.get("correlation_status", "")).lower() != "not applicable"
+            and str(f.get("test_status", "")).lower() != "not_vulnerable"
+        )
     ]
 
-    recommended_findings, recommendations = _generate_evidence_informed_recommendations(
-        applicable_for_recommendations,
-        overall_risk,
-        tool_context=tool_context,
-        validation_errors=validation_errors,
-    )
+    if applicable_for_recommendations:
+        recommended_findings, recommendations = _generate_evidence_informed_recommendations(
+            applicable_for_recommendations,
+            overall_risk,
+            tool_context=tool_context,
+            validation_errors=validation_errors,
+        )
+    else:
+        recommended_findings, recommendations = [], []
 
     recommendations_by_id = {
         str(f.get("vulnerability_id", "")): f.get("recommendations", [])
@@ -350,7 +358,10 @@ def build_audit_report(
             **f,
             "recommendations": (
                 []
-                if str(f.get("correlation_status", "")).lower() == "not applicable"
+                if (
+                    str(f.get("correlation_status", "")).lower() == "not applicable"
+                    or str(f.get("test_status", "")).lower() == "not_vulnerable"
+                )
                 else recommendations_by_id.get(
                     str(f.get("vulnerability_id", "")),
                     f.get("recommendations", []),
@@ -428,8 +439,15 @@ def validate_audit_report_semantics(
     if len(summary) < 50:
         errors.append("Executive summary is too brief or empty; requires comprehensive synthesis.")
 
+    actionable_findings = [
+        f for f in report.get("findings", [])
+        if (
+            str(f.get("correlation_status", "")).lower() != "not applicable"
+            and str(f.get("test_status", "")).lower() != "not_vulnerable"
+        )
+    ]
     overall_recs = report.get("recommendations", [])
-    if not overall_recs:
+    if actionable_findings and not overall_recs:
         errors.append("Report lacks overarching strategic recommendations.")
     else:
         for idx, rec in enumerate(overall_recs):
@@ -447,7 +465,10 @@ def validate_audit_report_semantics(
         vid = f.get("vulnerability_id", "Unknown")
         corr_stat = str(f.get("correlation_status", "")).lower()
         recs = f.get("recommendations", [])
-        if corr_stat != "not applicable":
+        if (
+            corr_stat != "not applicable"
+            and str(f.get("test_status", "")).lower() != "not_vulnerable"
+        ):
             if not recs:
                 errors.append(f"Finding '{vid}' has no actionable remediation recommendations.")
 
