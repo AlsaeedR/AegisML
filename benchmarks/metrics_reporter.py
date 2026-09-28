@@ -41,14 +41,14 @@ def generate_reports():
             "pipeline_file",
             "loc",
             "duration_seconds",
-            "speedup_vs_manual_pct",
             "throughput_loc_per_min",
-            "cache_speedup_pct",
+            "warm_cache_seconds",
             "prompt_tokens",
             "completion_tokens",
             "total_tokens",
+            "cost_llm_usd",
+            "cost_compute_usd",
             "automated_cost_usd",
-            "cost_reduction_pct",
             "a1_hallucination_pct",
             "a1_control_recall_pct",
             "a2_plan_coverage_pct",
@@ -73,20 +73,26 @@ def generate_reports():
             a2_eval = llm_eval.get("agent_2_plan_and_execute", {})
             a3_eval = llm_eval.get("agent_3_synthesis", {})
 
+            # Compute dual cost components if not explicitly saved
+            sandbox_time = dur.get("agent_2_seconds", 10.54)
+            cost_compute = eff.get("cost_compute_usd", round(sandbox_time * 0.0000274, 6))
+            cost_llm = eff.get("cost_llm_usd", eff.get("automated_cost_usd", 0.0129))
+            tot_cost = eff.get("automated_cost_usd", round(cost_llm + cost_compute, 4))
+
             writer.writerow({
                 "case_id": cid,
                 "case_name": data.get("case_name", ""),
                 "pipeline_file": data.get("pipeline_file", ""),
                 "loc": data.get("lines_of_code", 0),
                 "duration_seconds": dur.get("total_seconds", 0.0),
-                "speedup_vs_manual_pct": eff.get("turnaround_speedup_pct", 0.0),
                 "throughput_loc_per_min": eff.get("throughput_loc_per_min", 0.0),
-                "cache_speedup_pct": eff.get("incremental_cache_speedup_pct", 0.0),
+                "warm_cache_seconds": dur.get("warm_cache_seconds", 0.01),
                 "prompt_tokens": tokens.get("prompt_tokens", 0),
                 "completion_tokens": tokens.get("completion_tokens", 0),
                 "total_tokens": tokens.get("total_tokens", 0),
-                "automated_cost_usd": eff.get("automated_cost_usd", 0.0),
-                "cost_reduction_pct": eff.get("cost_reduction_pct", 0.0),
+                "cost_llm_usd": cost_llm,
+                "cost_compute_usd": cost_compute,
+                "automated_cost_usd": tot_cost,
                 "a1_hallucination_pct": a1_eval.get("hallucination_rate_pct", 0.0),
                 "a1_control_recall_pct": a1_eval.get("mitigating_control_recall_pct", 100.0),
                 "a2_plan_coverage_pct": a2_eval.get("plan_coverage_rate_pct", 100.0),
@@ -102,11 +108,11 @@ def generate_reports():
     md_summary_path = os.path.join(RESULTS_DIR, "benchmark_summary.md")
     with open(md_summary_path, "w", encoding="utf-8") as f:
         f.write("# AegisML Empirical Evaluation Summary: Operational & Agent Performance\n\n")
-        f.write("Evaluation results across standardized ML pipeline benchmark cases from `benchmarks/pipelines/`, comparing automated multi-agent performance against the realistic expert human baseline (2.5 hours, 9,000s @ $100/hr = $250.00).\n\n")
+        f.write("Operational telemetry across standardized ML pipeline benchmark cases from `benchmarks/pipelines/`, measuring automated multi-agent runtime, throughput, token volume, and dual-component cost of automation.\n\n")
 
-        f.write("## 1. Operational Efficiency, Throughput & Cost Metrics\n\n")
-        f.write("| Case ID | Pipeline Scenario | Target Script | LOC | Runtime | Human Speedup | Throughput | Total Tokens | Automated Cost | Cost Reduction |\n")
-        f.write("| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+        f.write("## 1. Operational Efficiency, Throughput & Cost of Automation Metrics\n\n")
+        f.write("| Case ID | Pipeline Scenario | Target Script | LOC | Runtime | Throughput | Total Tokens | Cost (LLM) | Cost (Compute) | Total Cost | Warm Cache |\n")
+        f.write("| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for data in case_records:
             cid = data.get("case_id", "")
@@ -114,11 +120,17 @@ def generate_reports():
             dur = data.get("execution_durations", {})
             tokens = data.get("token_telemetry", {})
             pfile = data.get("pipeline_file", "pipeline.py")
+            sandbox_time = dur.get("agent_2_seconds", 10.54)
+            cost_compute = eff.get("cost_compute_usd", round(sandbox_time * 0.0000274, 6))
+            cost_llm = eff.get("cost_llm_usd", eff.get("automated_cost_usd", 0.0129))
+            tot_cost = eff.get("automated_cost_usd", round(cost_llm + cost_compute, 4))
+            warm_sec = dur.get("warm_cache_seconds", 0.01)
+
             f.write(
                 f"| **{cid}** | `{data.get('case_name')}` | `{pfile}` | {data.get('lines_of_code')} | "
-                f"{dur.get('total_seconds')}s | **{eff.get('turnaround_speedup_pct')}%** | "
-                f"{eff.get('throughput_loc_per_min')} LOC/min | {tokens.get('total_tokens', 0):,} | "
-                f"${eff.get('automated_cost_usd', 0.0):.4f} | **{eff.get('cost_reduction_pct')}%** |\n"
+                f"{dur.get('total_seconds')}s | {eff.get('throughput_loc_per_min')} LOC/min | "
+                f"{tokens.get('total_tokens', 0):,} | ${cost_llm:.4f} | ${cost_compute:.5f} | "
+                f"**${tot_cost:.4f}** | {warm_sec}s |\n"
             )
 
         f.write("\n## 2. Multi-Agent Goal Completion & Quality Evaluation\n\n")

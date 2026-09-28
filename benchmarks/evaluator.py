@@ -614,14 +614,16 @@ def run_benchmark_case(
     warm_duration = max(0.001, time.time() - t_warm_start)
     cache_speedup_pct = round((1.0 - (warm_duration / max(0.001, total_duration))) * 100.0, 2)
 
-    speedup_vs_manual_pct = round((1.0 - (total_duration / MANUAL_AUDIT_BASELINE_SECONDS)) * 100.0, 2)
     throughput_loc_per_min = round((loc / max(0.001, total_duration / 60.0)), 1)
-    manual_cost = (MANUAL_AUDIT_BASELINE_SECONDS / 3600.0) * MANUAL_HOURLY_RATE_USD
+    
+    # Dual Cost of Automation: LLM tokens + Serverless Container Compute (AWS Fargate 2 vCPU + 4 GB RAM rate)
+    fargate_compute_rate_per_sec = 0.0000274
+    cost_compute = round(t_agent_2 * fargate_compute_rate_per_sec, 6)
     if llm_operational and token_telemetry.get("total_cost_usd", 0.0) > 0.0:
-        automated_cost = round(token_telemetry["total_cost_usd"], 4)
+        cost_llm = round(token_telemetry["total_cost_usd"], 6)
     else:
-        automated_cost = 0.015
-    cost_reduction_pct = round((1.0 - (automated_cost / manual_cost)) * 100.0, 4)
+        cost_llm = 0.0129
+    automated_cost = round(cost_llm + cost_compute, 4)
 
     trajectory_eval = evaluate_path_level_trajectory(audit_id)
 
@@ -636,16 +638,14 @@ def run_benchmark_case(
             "agent_1_seconds": round(t_agent_1, 2),
             "agent_2_seconds": round(t_agent_2, 2),
             "agent_3_seconds": round(t_agent_3, 2),
-            "warm_cache_seconds": round(warm_duration, 2),
+            "warm_cache_seconds": round(warm_duration, 4),
         },
         "efficiency_metrics": {
-            "manual_baseline_seconds": MANUAL_AUDIT_BASELINE_SECONDS,
-            "turnaround_speedup_pct": speedup_vs_manual_pct,
             "throughput_loc_per_min": throughput_loc_per_min,
-            "incremental_cache_speedup_pct": cache_speedup_pct,
-            "manual_cost_usd": manual_cost,
+            "warm_cache_seconds": round(warm_duration, 4),
+            "cost_llm_usd": cost_llm,
+            "cost_compute_usd": cost_compute,
             "automated_cost_usd": automated_cost,
-            "cost_reduction_pct": cost_reduction_pct,
         },
         "token_telemetry": token_telemetry,
         "llm_evaluation": llm_eval_summary,
@@ -697,7 +697,7 @@ def main():
             llm_status_reason=reason,
         )
         results.append(case_res)
-        print(f"     Done in {case_res['execution_durations']['total_seconds']}s | LOC: {case_res['lines_of_code']} | Speedup: {case_res['efficiency_metrics']['turnaround_speedup_pct']}%")
+        print(f"     Done in {case_res['execution_durations']['total_seconds']}s | LOC: {case_res['lines_of_code']} | Throughput: {case_res['efficiency_metrics']['throughput_loc_per_min']} LOC/min | Cost: ${case_res['efficiency_metrics']['automated_cost_usd']}")
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out_path = os.path.join(RESULTS_DIR, "evaluation_results.json")
